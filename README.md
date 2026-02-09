@@ -134,6 +134,7 @@ Fargate Spot + API Gateway 조합으로 극한의 비용 최적화를 적용합�
 ## 문서
 
 - [PRD (Product Requirements Document)](docs/PRD.md)
+- [아키텍처 설계](docs/architecture.md)
 - [비용 최적화 분석](docs/cost-optimization.md)
 
 ## 라이선스
