@@ -138,6 +138,62 @@ OpenClaw의 on-demand 특성상 Spot과 잘 맞음:
 
 ---
 
+## 6. 검토했지만 채택하지 않은 대안: Lambda 컨테이너
+
+ECS Fargate Spot 대신 컨테이너 기반 Lambda를 사용하는 방안을 검토했으나, OpenClaw의 특성상 적합하지 않아 채택하지 않았다.
+
+### Lambda 컨테이너 이미지 주요 제약
+
+| 항목 | Lambda 컨테이너 | Fargate Spot |
+|------|----------------|-------------|
+| 최대 실행 시간 | **15분 (하드 리밋)** | 무제한 |
+| 최대 이미지 크기 | 10GB | 무제한 |
+| 최대 메모리 | 10,240MB | 설정 가능 |
+| WebSocket 지원 | 불가 (상태 비유지) | 네이티브 지원 |
+| 상시 프로세스 | 불가 (요청당 1회 실행) | 가능 |
+| Cold start | ~1초 (캐시 후) | ~30초-1분 |
+
+### 비용 비교 (하루 2시간 연속 실행)
+
+| 항목 | Lambda 컨테이너 | Fargate Spot |
+|------|----------------|-------------|
+| 컴퓨팅 비용 | ~$3.60 (216K GB-seconds x $0.0000167) | **~$0.23** |
+| 요청 비용 | ~$1.62 (프리 티어 초과 시) | $0 |
+| **월 합계** | **~$5.22** | **~$0.23** |
+
+Fargate Spot이 **22배 더 저렴** 하다.
+
+### 채택하지 않은 이유
+
+1. **15분 타임아웃**: OpenClaw는 장기 실행 에이전트. 대화 세션, 브라우저 자동화, 복잡한 태스크가 15분을 초과할 수 있음
+2. **WebSocket 미지원**: Lambda는 persistent connection을 유지할 수 없음. Lambda Web Adapter도 HTTP 요청 단위로만 동작하며 WebSocket 불가
+3. **비용이 오히려 더 높음**: 장시간 연속 실행 시 GB-second 과금이 Fargate Spot보다 비쌈
+4. **상시 프로세스 불가**: Lambda는 요청당 격리 실행. OpenClaw의 인메모리 상태(스킬 로딩, 대화 컨텍스트)를 매 요청마다 재구성해야 함
+
+### 하이브리드 접근도 검토
+
+단순 채팅은 Lambda(즉시 응답), 장기 태스크는 Fargate로 라우팅하는 하이브리드 방식도 검토했으나:
+- 추가 구현 복잡도(라우팅 로직, 상태 직렬화, 두 런타임 관리) 대비 절감 효과가 미미 ($0.23/월 이하)
+- 요청이 15분 이상 걸릴지 사전 예측이 어려운 경우 존재
+- **결론**: 구현 복잡도 대비 비용/UX 이점이 불충분하여 Fargate Spot 단독 구조 유지
+
+### Lambda가 적합한 역할
+
+현재 아키텍처에서 Lambda는 **Gateway 역할** (인증, 라우팅, 컨테이너 관리)로 활용 중이며, 이 용도에는 최적이다:
+- 짧은 실행 시간 (수백 ms)
+- 이벤트 기반 처리
+- 프리 티어 내 무료 운영
+
+### 참고 자료
+
+- [AWS Lambda Container Image Support](https://aws.amazon.com/blogs/aws/new-for-aws-lambda-container-image-support/)
+- [Lambda Container Images Documentation](https://docs.aws.amazon.com/lambda/latest/dg/images-create.html)
+- [Lambda Pricing](https://aws.amazon.com/lambda/pricing/)
+- [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter)
+- [Lambda Response Streaming](https://aws.amazon.com/blogs/compute/using-response-streaming-with-aws-lambda-web-adapter-to-optimize-performance/)
+
+---
+
 ## 참고 자료
 
 - [AWS Fargate Pricing](https://aws.amazon.com/fargate/pricing/)
