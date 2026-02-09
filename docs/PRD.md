@@ -198,17 +198,37 @@ sequenceDiagram
 
 ## 7. 예상 비용 (월간, 개인 사용 기준)
 
+Fargate Spot + API Gateway 조합으로 극한의 비용 최적화를 적용한다. 상세 분석은 [비용 최적화 분석](cost-optimization.md) 참조.
+
+### 프리 티어 내 (가입 후 12개월)
+
 | 서비스 | 사용 패턴 | 예상 비용 |
 |--------|----------|----------|
-| ECS Fargate | 하루 2시간 사용 (0.25 vCPU, 0.5GB) | ~$3-5 |
-| Lambda | 월 10,000 요청 | ~$0 (프리 티어) |
-| API Gateway | WebSocket + REST | ~$1-2 |
-| DynamoDB | 월 100K 읽기/쓰기 | ~$0 (프리 티어) |
+| ECS Fargate Spot | 하루 2시간 (0.25 vCPU, 0.5GB) | ~$0.23 |
+| API Gateway | WebSocket + REST (월 10K 요청) | $0 (프리 티어) |
+| Lambda | 컨테이너 관리 | $0 (프리 티어) |
+| DynamoDB | 월 100K 읽기/쓰기 | $0 (프리 티어) |
+| S3 | 1GB 이하 | $0 (프리 티어) |
+| CloudFront | 1GB 전송 | $0 (프리 티어) |
+| Cognito | 50,000 MAU 이하 | $0 (무기한 무료) |
+| CloudWatch | 기본 로깅 | $0 (프리 티어) |
+| **합계** | | **~$0.23/월** |
+
+### 프리 티어 만료 후
+
+| 서비스 | 사용 패턴 | 예상 비용 |
+|--------|----------|----------|
+| ECS Fargate Spot | 하루 2시간 (0.25 vCPU, 0.5GB) | ~$0.23 |
+| API Gateway | WebSocket + REST (월 10K 요청) | ~$0.05 |
+| Lambda | 컨테이너 관리 | ~$0 |
+| DynamoDB | 월 100K 읽기/쓰기 | ~$0.16 |
 | S3 | 1GB 이하 | ~$0.03 |
-| CloudFront | 10GB 이하 전송 | ~$0 (프리 티어) |
-| Cognito | 50,000 MAU 이하 | ~$0 (프리 티어) |
-| CloudWatch | 기본 로깅 | ~$0-1 |
-| **합계** | | **~$5-10/월** |
+| CloudFront | 1GB 전송 | ~$0.09 |
+| Cognito | 50,000 MAU 이하 | $0 (무기한 무료) |
+| CloudWatch | 기본 로깅 | ~$0.50 |
+| **합계** | | **~$1.07/월** |
+
+> **핵심 최적화 포인트**: Fargate Spot은 On-Demand 대비 ~70% 할인. API Gateway는 ALB 대비 월 $18-25 절감. 개인 저트래픽 사용에서 ELB 제거가 가장 큰 비용 절감 요소.
 
 ---
 

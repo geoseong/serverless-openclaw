@@ -6,7 +6,7 @@ AWS 서버리스 인프라에서 [OpenClaw](https://github.com/openclaw/openclaw
 
 ## 주요 특징
 
-- **서버리스 On-demand 실행**: ECS Fargate 기반으로 요청 시에만 컨테이너를 구동하여 비용 최소화 (~$5-10/월)
+- **서버리스 On-demand 실행**: ECS Fargate Spot 기반으로 요청 시에만 컨테이너를 구동하여 비용 최소화 (~$1/월)
 - **웹 채팅 UI**: React SPA 기반 실시간 채팅 인터페이스 (S3 + CloudFront 호스팅)
 - **Telegram 봇 통합**: Telegram을 통한 어디서든 AI 에이전트와 대화
 - **멀티 LLM 지원**: Claude, GPT, DeepSeek 등 사용자가 원하는 LLM 프로바이더 선택 가능
@@ -88,14 +88,16 @@ graph TB
 
 ## 예상 비용
 
-개인 사용 기준 월 **~$5-10** (하루 2시간 사용 가정)
+Fargate Spot + API Gateway 조합으로 극한의 비용 최적화를 적용합니다. (하루 2시간 사용 가정)
 
-| 서비스 | 예상 비용 |
-|--------|----------|
-| ECS Fargate | ~$3-5 |
-| API Gateway | ~$1-2 |
-| CloudWatch | ~$0-1 |
-| 기타 (Lambda, DynamoDB, S3, CloudFront, Cognito) | ~$0 (프리 티어) |
+| 구분 | 월 비용 |
+|------|--------|
+| 프리 티어 내 (12개월) | **~$0.23/월** |
+| 프리 티어 만료 후 | **~$1.07/월** |
+
+핵심: Fargate Spot (On-Demand 대비 ~70% 할인) + API Gateway (ALB 대비 월 $18-25 절감)
+
+상세 분석: [비용 최적화 문서](docs/cost-optimization.md)
 
 ## 문서
 
