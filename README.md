@@ -143,6 +143,32 @@ Fargate Spot + API Gateway 조합으로 극한의 비용 최적화를 적용합�
 | **security** | `/security` | 보안 체크리스트 (Bridge 방어, IDOR, 시크릿) |
 | **cost** | `/cost` | 비용 목표 검증 (금지 리소스, 체크리스트) |
 
+## 프로젝트 구조
+
+```
+serverless-openclaw/
+├── packages/
+│   ├── shared/      # 공유 타입, 상수
+│   ├── cdk/         # AWS CDK 인프라 정의
+│   ├── gateway/     # Lambda 함수 (API Gateway 핸들러)
+│   ├── container/   # Fargate 컨테이너 (Bridge 서버)
+│   └── web/         # React SPA (Vite)
+├── docs/            # 설계 문서
+└── references/      # 참조 프로젝트 (MoltWorker 등)
+```
+
+npm workspaces 모노레포 + TypeScript project references로 구성되어 있습니다.
+
+## 개발 시작
+
+```bash
+npm install          # 의존성 설치
+npm run build        # TypeScript 빌드
+npm run lint         # ESLint 검사
+npm run format       # Prettier 포맷팅
+npm run test         # Vitest 테스트
+```
+
 ## 문서
 
 - [PRD (Product Requirements Document)](docs/PRD.md)

@@ -1,0 +1,20 @@
+{
+  "name": "serverless-openclaw",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "build": "tsc --build",
+    "lint": "eslint packages/",
+    "format": "prettier --write \"packages/*/src/**/*.ts\"",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "~5.7.0",
+    "eslint": "^9.0.0",
+    "@eslint/js": "^9.0.0",
+    "typescript-eslint": "^8.0.0",
+    "prettier": "^3.4.0",
+    "vitest": "^3.0.0",
+    "tsx": "^4.19.0"
+  }
+}
