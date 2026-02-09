@@ -50,9 +50,8 @@ graph TB
 
     subgraph "네트워크"
         VPC[VPC]
-        PrivSub[프라이빗 서브넷]
         PubSub[퍼블릭 서브넷]
-        NAT[NAT Gateway]
+        VPCE[VPC Gateway Endpoints\nDynamoDB, S3]
     end
 
     subgraph "시크릿"
@@ -85,8 +84,8 @@ graph TB
 
     ECS --> Fargate
     ECR --> ECS
-    Fargate --> PrivSub
-    PrivSub --> NAT
+    Fargate --> PubSub
+    Fargate --> VPCE
     Watchdog --> DDB_Task
     Watchdog --> ECS
 ```
@@ -95,18 +94,20 @@ graph TB
 
 ## 2. 네트워크 설계
 
+### 설계 원칙: NAT Gateway 제거
+
+NAT Gateway는 단일 AZ 최소 구성에서도 월 ~$33(고정 $4.5 + 데이터 처리 비용)이 발생한다. 이는 전체 비용 목표($1/월)를 30배 이상 초과하므로, Fargate에 Public IP를 할당하여 NAT Gateway를 완전히 제거한다.
+
 ### VPC 구성
 
 ```
 VPC: 10.0.0.0/16
 
-퍼블릭 서브넷 (NAT Gateway용):
+퍼블릭 서브넷 (Fargate 태스크, Public IP 할당):
   - 10.0.1.0/24 (AZ-a)
   - 10.0.2.0/24 (AZ-b)
 
-프라이빗 서브넷 (Fargate 태스크):
-  - 10.0.10.0/24 (AZ-a)
-  - 10.0.20.0/24 (AZ-b)
+프라이빗 서브넷: 없음 (NAT Gateway 불필요)
 ```
 
 ### 네트워크 흐름
@@ -115,41 +116,39 @@ VPC: 10.0.0.0/16
 graph LR
     Internet[인터넷]
     APIGW[API Gateway]
-    Lambda[Lambda]
-    NAT[NAT Gateway]
-    Fargate[Fargate Task]
+    Lambda[Lambda\nVPC 외부]
+    Fargate[Fargate Task\nPublic IP]
+    VPCE[VPC Gateway Endpoints\nDynamoDB, S3]
 
     Internet --> APIGW
     APIGW --> Lambda
-    Lambda -->|ECS API| Fargate
-    Fargate -->|아웃바운드| NAT --> Internet
+    Lambda -->|Public IP| Fargate
+    Fargate -->|직접 아웃바운드| Internet
+    Fargate --> VPCE
 ```
 
-- **Fargate 태스크**: 프라이빗 서브넷에 배치. NAT Gateway를 통해 외부 API(LLM 프로바이더) 호출
-- **Lambda**: VPC 외부에서 실행. ECS API로 Fargate 태스크 관리
-- **NAT Gateway**: 비용 최적화를 위해 단일 AZ에 1개만 배치 (개인 사용 기준)
+- **Fargate 태스크**: 퍼블릭 서브넷에 배치, Public IP 할당. LLM API 등 외부 서비스에 직접 접근 (NAT 불필요)
+- **Lambda**: VPC 외부에서 실행. ECS API로 태스크 관리, Fargate Public IP로 Bridge 서버에 HTTP 통신
+- **VPC Gateway Endpoints**: DynamoDB, S3 트래픽을 AWS 내부 네트워크로 유지 (무료, 성능 최적화)
 
 ### 보안 그룹
 
 | 보안 그룹 | 인바운드 | 아웃바운드 |
 |----------|---------|----------|
-| **sg-fargate** | 없음 (Lambda는 ECS API로 통신) | 443 (HTTPS) - LLM API, DynamoDB, S3 |
-| **sg-vpc-endpoint** | 443 from sg-fargate | 없음 |
+| **sg-fargate** | 8080 (Bridge) - 0.0.0.0/0 (인증 토큰으로 보호) | 전체 허용 (443 HTTPS - LLM API, AWS 서비스) |
 
-### VPC Endpoints (NAT 비용 절감)
+> **Bridge 보안**: Lambda는 VPC 외부에서 실행되어 고정 IP가 없으므로, Security Group으로 소스 IP를 제한할 수 없다. Bridge 서버의 공유 시크릿 토큰 인증으로 무단 접근을 차단한다.
 
-NAT Gateway 트래픽 비용을 줄이기 위해 AWS 서비스는 VPC Endpoint로 접근:
+### VPC Gateway Endpoints
 
-| 서비스 | Endpoint 유형 | 이유 |
-|--------|-------------|------|
-| DynamoDB | Gateway (무료) | 대화 이력 읽기/쓰기 빈번 |
-| S3 | Gateway (무료) | 파일 백업/설정 접근 |
-| ECR | Interface | Docker 이미지 풀 |
-| CloudWatch Logs | Interface | 로그 전송 |
-| Secrets Manager | Interface | 시크릿 조회 |
-| SSM | Interface | 파라미터 조회 |
+Fargate가 Public IP로 인터넷에 직접 접근 가능하지만, AWS 서비스 트래픽은 VPC Gateway Endpoint를 통해 AWS 내부 네트워크로 라우팅하여 지연 시간을 줄이고 데이터 전송 비용을 절감한다.
 
-> **비용 참고**: Interface Endpoint는 월 ~$7/개. 개인 사용에서는 NAT Gateway($4.5/월 + 데이터)와 비교하여 선택적 적용. MVP에서는 NAT Gateway만 사용하고, Phase 2에서 비용 분석 후 Endpoint 도입 검토.
+| 서비스 | Endpoint 유형 | 비용 | 이유 |
+|--------|-------------|------|------|
+| DynamoDB | Gateway | 무료 | 대화 이력 읽기/쓰기 빈번 |
+| S3 | Gateway | 무료 | 파일 백업/설정 접근 |
+
+> **참고**: ECR, CloudWatch Logs, Secrets Manager 등은 Fargate의 Public IP를 통해 공개 endpoint로 접근. Interface Endpoint(월 ~$7/개)는 비용 목표에 부합하지 않으므로 사용하지 않는다.
 
 ---
 
@@ -364,7 +363,7 @@ sequenceDiagram
 | Task Role | openclaw-task-role | DynamoDB, S3, SSM 접근 |
 | Execution Role | openclaw-exec-role | ECR pull, CloudWatch logs |
 | Log Driver | awslogs | CloudWatch Logs 그룹으로 전송 |
-| Assign Public IP | false | 프라이빗 서브넷 + NAT |
+| Assign Public IP | true | 퍼블릭 서브넷, 직접 인터넷 접근 (NAT 불필요) |
 
 ### 4.6 Spot 중단 대응
 
@@ -439,7 +438,7 @@ Fargate 태스크 상태 추적.
 | **PK** | S | `USER#{userId}` |
 | taskArn | S | ECS 태스크 ARN |
 | status | S | `Idle` / `Starting` / `Running` / `Stopping` |
-| taskIp | S | 태스크 프라이빗 IP (Running 시) |
+| publicIp | S | 태스크 퍼블릭 IP (Running 시) |
 | startedAt | S | 시작 시각 |
 | lastActivity | S | 마지막 활동 시각 |
 | ttl | N | 자동 삭제용 TTL |
@@ -462,6 +461,28 @@ WebSocket 연결 관리.
 | userId | connectedAt |
 
 > 사용자의 활성 WebSocket 연결을 조회하여 메시지를 브로드캐스트할 때 사용.
+
+### 5.5 PendingMessages 테이블
+
+Cold start 중 유실 방지를 위한 메시지 큐. 컨테이너가 시작되기 전에 도착한 메시지를 임시 저장하고, Bridge가 시작 후 소비한다.
+
+| 속성 | 타입 | 설명 |
+|------|------|------|
+| **PK** | S | `USER#{userId}` |
+| **SK** | S | `MSG#{timestamp}#{uuid}` |
+| message | S | 사용자 메시지 내용 |
+| channel | S | `web` / `telegram` |
+| connectionId | S | 응답을 보낼 WebSocket connectionId |
+| createdAt | S | ISO 8601 타임스탬프 |
+| ttl | N | 5분 후 자동 삭제 (미처리 메시지 정리) |
+
+**처리 흐름:**
+1. Lambda: 컨테이너 미실행 시 → PendingMessages에 메시지 저장 + RunTask
+2. Bridge 시작: DynamoDB에서 userId의 PendingMessages 조회 (SK begins_with `MSG#`)
+3. Bridge: 각 대기 메시지를 OpenClaw Gateway에 순서대로 전달
+4. Bridge: 처리 완료된 메시지 삭제 (`DeleteItem`)
+
+> **TTL 안전장치**: 5분 TTL로 Bridge가 비정상 종료되어도 대기 메시지가 무한히 쌓이지 않는다.
 
 ---
 
@@ -651,6 +672,96 @@ sequenceDiagram
 }
 ```
 
+### 7.5 Public IP 다층 방어 전략
+
+Fargate에 Public IP를 할당하여 NAT Gateway를 제거하므로, Bridge 서버(`:8080`)가 인터넷에 노출된다. 다음 계층별 방어로 보안을 확보한다.
+
+```mermaid
+graph TD
+    Internet[인터넷] --> SG[Security Group\n8080만 허용]
+    SG --> Bridge[Bridge 서버\nBearer 토큰 인증]
+    Bridge --> GW[OpenClaw Gateway\nlocalhost:18789\n외부 접근 불가]
+```
+
+| 계층 | 대책 | 방어 대상 | 비용 |
+|------|------|----------|------|
+| Security Group | 인바운드 8080만 허용, 나머지 전체 차단 | 포트 스캐닝, 불필요한 서비스 노출 | $0 |
+| Bridge 인증 | `Authorization: Bearer <token>` 검증. `/health` 외 모든 엔드포인트 필수 | 무단 API 호출 | $0 |
+| Gateway localhost 바인딩 | `--bind localhost` — 18789 포트는 컨테이너 내부에서만 접근 | Gateway 직접 접근 차단 | $0 |
+| 토큰 관리 | Secrets Manager 저장, 환경 변수로 주입. 디스크 미기록 | 토큰 유출 | ~$0.40/월 |
+| 비root 컨테이너 | `USER openclaw` — 비특권 사용자로 실행 | 컨테이너 탈출 시 권한 상승 | $0 |
+| TLS | Bridge에 자체 서명 인증서 적용 (Node.js `https.createServer`) | 토큰 스니핑 (평문 HTTP 구간) | $0 |
+
+> **비용 영향**: 다층 방어 전체가 Secrets Manager 1개 시크릿($0.40/월) 외에는 추가 비용 없음.
+
+### 7.6 Bridge 인증 상세
+
+```
+Lambda → Bridge 요청:
+  POST https://{publicIp}:8080/message
+  Headers:
+    Authorization: Bearer {BRIDGE_AUTH_TOKEN}
+    Content-Type: application/json
+  Body: { userId, message, channel, connectionId, callbackUrl }
+
+Bridge 검증:
+  1. Authorization 헤더에서 Bearer 토큰 추출
+  2. 환경 변수 BRIDGE_AUTH_TOKEN과 일치 여부 확인
+  3. 불일치 시 401 Unauthorized 즉시 반환
+  4. /health 엔드포인트만 인증 면제 (ECS 헬스체크용)
+```
+
+**토큰 생명주기:**
+- CDK 배포 시 Secrets Manager에 자동 생성 (32바이트 랜덤)
+- Lambda 환경 변수와 Fargate 컨테이너 환경 변수에 동일 토큰 주입
+- 토큰 로테이션: Secrets Manager 자동 로테이션 + 컨테이너 재시작으로 적용
+
+### 7.7 컨테이너 보안 강화
+
+| 항목 | 설정 | 이유 |
+|------|------|------|
+| 실행 사용자 | `openclaw` (비root) | OpenClaw skills가 임의 코드를 실행할 수 있으므로 root 권한 제한 |
+| 읽기 전용 루트 파일시스템 | `readonlyRootFilesystem: true` (Phase 2) | 컨테이너 변조 방지 |
+| Gateway 바인딩 | `--bind localhost` | 18789 포트 외부 노출 차단 |
+| EXPOSE | 8080만 | 18789는 localhost 전용이므로 노출 불필요 |
+| 시크릿 전달 | 환경 변수 (Secrets Manager → ECS) | 디스크에 API 키 미기록. `openclaw.json`에 토큰 미포함 |
+| 홈 디렉토리 | `/home/openclaw/` | `/root/` 대신 비root 사용자 홈 사용 |
+
+### 7.8 IDOR (Insecure Direct Object Reference) 방지
+
+모든 API 경로에서 인증된 사용자가 자신의 리소스만 접근 가능하도록 강제한다.
+
+| 계층 | 검증 로직 |
+|------|----------|
+| **ws-message Lambda** | connectionId → Connections 테이블에서 userId 조회 → 요청의 userId와 일치 여부 확인 |
+| **Bridge /message** | Lambda가 전달한 userId만 사용. 클라이언트 입력 userId 무시 |
+| **REST API (대화 이력)** | JWT에서 추출한 userId로만 DynamoDB 쿼리 (PK = `USER#{jwt.sub}`) |
+| **Telegram webhook** | 페어링된 telegramUserId → userId 매핑 테이블 조회. 미페어링 사용자 거부 |
+
+> **원칙**: userId는 항상 서버 측에서 결정 (JWT 또는 connectionId 역조회). 클라이언트가 보낸 userId를 신뢰하지 않는다.
+
+### 7.9 시크릿 디스크 미기록 원칙
+
+컨테이너 파일시스템에 API 키, 토큰 등 시크릿이 기록되지 않도록 한다.
+
+| 시크릿 | 전달 방식 | 디스크 기록 여부 |
+|--------|----------|----------------|
+| ANTHROPIC_API_KEY | Secrets Manager → ECS 환경 변수 | **미기록** — `openclaw.json`에 포함하지 않음 |
+| BRIDGE_AUTH_TOKEN | Secrets Manager → ECS 환경 변수 | **미기록** |
+| OPENCLAW_GATEWAY_TOKEN | Secrets Manager → ECS 환경 변수 | **미기록** — CLI `--token` 인자 대신 환경 변수 사용 |
+| TELEGRAM_BOT_TOKEN | SSM Parameter Store → Lambda 환경 변수 | **미기록** — 컨테이너에 전달하지 않음 (webhook-only 방식) |
+
+**Config 패치 시 주의:**
+
+```typescript
+// patch-config.ts — 시크릿을 config 파일에 기록하지 않음
+// API 키는 환경 변수로만 전달, config에는 프로바이더/모델 설정만 기록
+config.auth = { method: "env" }; // "apiKey" 대신 환경 변수 참조
+delete config.auth?.apiKey;       // 혹시 존재하면 제거
+```
+
+> **MoltWorker와의 차이**: MoltWorker는 `openclaw.json`에 API 키를 직접 기록하고 R2에 백업한다. 우리는 Secrets Manager를 통해 환경 변수로만 전달하여 S3 백업에 시크릿이 포함되지 않도록 한다.
+
 ---
 
 ## 8. CDK 스택 설계
@@ -660,7 +771,7 @@ sequenceDiagram
 ```mermaid
 graph TD
     App[CDK App]
-    NS[NetworkStack\nVPC, 서브넷, NAT]
+    NS[NetworkStack\nVPC, 퍼블릭 서브넷, VPC Endpoints]
     SS[StorageStack\nDynamoDB, S3, ECR]
     AS[AuthStack\nCognito]
     CS[ComputeStack\nECS, Fargate Task Def]
@@ -683,8 +794,8 @@ graph TD
 
 | 스택 | 리소스 | 의존성 |
 |------|--------|--------|
-| **NetworkStack** | VPC, 서브넷, NAT Gateway, VPC Endpoints | 없음 |
-| **StorageStack** | DynamoDB 테이블 4개, S3 버킷 2개, ECR 리포지토리 | 없음 |
+| **NetworkStack** | VPC, 퍼블릭 서브넷, VPC Gateway Endpoints (DynamoDB, S3) | 없음 |
+| **StorageStack** | DynamoDB 테이블 5개, S3 버킷 2개, ECR 리포지토리 | 없음 |
 | **AuthStack** | Cognito User Pool, App Client | 없음 |
 | **ComputeStack** | ECS 클러스터, Fargate 태스크 정의, IAM 역할 | Network, Storage |
 | **ApiStack** | API Gateway (WS+REST), Lambda 함수 6개, IAM 역할 | Network, Storage, Auth, Compute |

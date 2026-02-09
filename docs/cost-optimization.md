@@ -70,9 +70,11 @@ OpenClaw의 on-demand 특성상 Spot과 잘 맞음:
 
 ### 조건
 - 리전: us-east-1
-- Fargate Spot: 0.25 vCPU, 0.5GB, 하루 2시간
+- Fargate Spot: 0.25 vCPU, 0.5GB, 하루 2시간 (퍼블릭 서브넷, Public IP 할당)
 - 월 10,000 요청, WebSocket 동시 접속 10개, 일 평균 30분 사용
 - DynamoDB: 월 100K 읽기/쓰기
+- NAT Gateway 없음 (Fargate Public IP로 직접 인터넷 접근)
+- VPC Gateway Endpoints: DynamoDB, S3 (무료)
 - S3: 1GB 이하
 
 ### 프리 티어 내 (가입 후 12개월)
@@ -87,6 +89,7 @@ OpenClaw의 on-demand 특성상 Spot과 잘 맞음:
 | Cognito | $0.00 | 50,000 MAU 무기한 무료 |
 | CloudWatch | $0.00 | 5GB 로그 수집 프리 티어 |
 | ECR | $0.00 | 500MB 스토리지 프리 티어 |
+| VPC (네트워크) | $0.00 | NAT Gateway 없음, VPC Gateway Endpoints 무료 |
 | **합계** | **~$0.23/월** | |
 
 ### 프리 티어 만료 후
@@ -102,6 +105,7 @@ OpenClaw의 on-demand 특성상 Spot과 잘 맞음:
 | Cognito | $0.00 | 50,000 MAU 무기한 무료 |
 | CloudWatch | $0.50 | 1GB 로그 수집($0.50) |
 | ECR | $0.01 | ~100MB Docker 이미지 |
+| VPC (네트워크) | $0.00 | NAT Gateway 없음, VPC Gateway Endpoints 무료 |
 | **합계** | **~$1.07/월** | |
 
 ---
@@ -126,7 +130,27 @@ OpenClaw의 on-demand 특성상 Spot과 잘 맞음:
 
 ---
 
-## 5. 추가 비용 최적화 옵션
+## 5. 네트워크 비용 최적화: NAT Gateway 제거
+
+NAT Gateway는 비활성 시에도 고정 비용이 발생하여, 저트래픽 개인 사용 환경에서 가장 큰 비용 요인이 된다.
+
+| 구성 | 월 고정 비용 | 데이터 처리 | 비고 |
+|------|------------|-----------|------|
+| NAT Gateway (단일 AZ) | ~$4.50 | $0.045/GB | 최소 월 ~$33 (일반적 사용 패턴) |
+| NAT Instance (fck-nat) | ~$3.00 | 인스턴스에 포함 | 관리 부담 증가 |
+| **Fargate Public IP** | **$0** | **$0** | **채택** |
+
+**채택한 방식**: Fargate를 퍼블릭 서브넷에 배치하고 Public IP를 할당하여 인터넷에 직접 접근. NAT Gateway를 완전히 제거한다.
+
+- VPC Gateway Endpoints (DynamoDB, S3): 무료. AWS 서비스 트래픽을 내부 네트워크로 유지
+- Interface Endpoints (ECR, CloudWatch 등): 미사용. 월 ~$7/개로 비용 목표 초과. Fargate Public IP로 공개 endpoint 접근
+- Lambda: VPC 외부 배치. 공개 AWS API endpoint 사용
+
+> **트레이드오프**: Bridge 서버(`:8080`)가 인터넷에 노출되므로, 공유 시크릿 토큰 기반 인증이 필수. Security Group만으로는 Lambda의 가변 IP를 특정할 수 없다.
+
+---
+
+## 6. 추가 비용 최적화 옵션
 
 | 전략 | 절감 효과 | 트레이드오프 |
 |------|----------|------------|
@@ -138,7 +162,7 @@ OpenClaw의 on-demand 특성상 Spot과 잘 맞음:
 
 ---
 
-## 6. 검토했지만 채택하지 않은 대안: Lambda 컨테이너
+## 7. 검토했지만 채택하지 않은 대안: Lambda 컨테이너
 
 ECS Fargate Spot 대신 컨테이너 기반 Lambda를 사용하는 방안을 검토했으나, OpenClaw의 특성상 적합하지 않아 채택하지 않았다.
 

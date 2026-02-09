@@ -129,7 +129,9 @@ graph TB
 |--------|-----|-----|------|
 | Conversations | userId | conversationId#timestamp | 대화 이력 |
 | Settings | userId | settingKey | 사용자 설정 (LLM 프로바이더, skill 설정 등) |
-| TaskState | taskId | - | Fargate 태스크 상태 추적 |
+| TaskState | userId | - | Fargate 태스크 상태 추적 |
+| Connections | connectionId | - | WebSocket 연결 관리 |
+| PendingMessages | userId | timestamp#uuid | Cold start 중 메시지 큐잉 |
 
 #### S3 버킷
 - **openclaw-data**: OpenClaw 설정 파일, skill 파일, 백업 데이터

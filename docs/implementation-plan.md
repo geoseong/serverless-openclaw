@@ -47,26 +47,43 @@ Lambda --HTTP POST--> Bridge(:8080) --local WS--> OpenClaw Gateway(:18789)
 Bridge --@connections POST--> API Gateway WS --> Client
 ```
 
-#### 결정 2: Lambda VPC 배치
+#### 결정 2: Lambda VPC 배치 및 네트워크 설계
 
-Lambda가 Fargate 태스크의 프라이빗 IP에 직접 HTTP 요청을 보내려면 동일 VPC에 배치해야 한다.
+NAT Gateway는 단일 AZ 최소 구성에서도 월 ~$33(고정 $4.5 + 데이터 처리 비용)이 발생하며, 이는 전체 비용 목표($1/월)를 30배 이상 초과한다.
 
-**결정**: Lambda를 프라이빗 서브넷에 배치. AWS 서비스 접근은 VPC Endpoint(DynamoDB, S3 Gateway), NAT Gateway(외부 API)를 사용한다.
+**결정**: NAT Gateway를 제거하고 다음 구조를 채택한다.
 
-> VPC Lambda의 cold start 페널티는 2019년 VPC Hyperplane 도입 이후 사실상 해소됨 (<1초 추가).
+| 컴포넌트 | 배치 | 이유 |
+|----------|------|------|
+| Fargate | 퍼블릭 서브넷 + Public IP 할당 | 직접 인터넷 접근 (LLM API, Telegram 등). NAT Gateway 불필요 |
+| Lambda | VPC 외부 | ECS API, API Gateway Management API 등 공개 AWS endpoint 사용. VPC 배치 불필요 |
+| VPC Gateway Endpoints | DynamoDB, S3 (무료) | Fargate의 AWS 서비스 트래픽을 AWS 내부 네트워크로 유지 |
+
+- Lambda → Fargate 통신: `DescribeTasks`로 퍼블릭 IP 확인 → Bridge 서버(`:8080`)에 HTTP 요청
+- Bridge 서버 인증: 공유 시크릿 토큰으로 무단 접근 차단 (Security Group만으로는 Lambda의 가변 IP를 특정할 수 없으므로)
+- 프라이빗 서브넷 불필요 → VPC 구조 단순화
 
 #### 결정 3: Telegram 통합 전략
 
 | 방식 | 장점 | 단점 |
 |------|------|------|
-| **A. Lambda가 모든 메시지 처리** | 항상 응답 가능 | Bridge에 복잡한 프로토콜 변환 필요 |
+| **A. Webhook-only (Lambda 경유)** | 항상 응답 가능, 단일 경로 | Bridge에 메시지 전달 로직 필요 |
 | **B. OpenClaw 네이티브 (long polling)** | 단순, 내장 기능 활용 | 컨테이너 다운 시 메시지 유실 |
-| **C. 하이브리드** | 항상 응답 + 네이티브 활용 | 이중 경로 관리 |
+| ~~C. 하이브리드~~ | ~~항상 응답 + 네이티브~~ | **Telegram API 제약으로 불가** |
 
-**결정**: **방식 C (하이브리드)**
-- Telegram webhook → Lambda: 컨테이너 미실행 시 "깨우는 중..." 응답 + 컨테이너 시작
-- 컨테이너 실행 중: OpenClaw가 Telegram long polling으로 직접 처리 (NAT Gateway 경유)
-- Lambda는 wake-up 트리거 역할만 수행
+**결정**: **방식 A (Webhook-only)**
+
+> **방식 C가 불가능한 이유**: Telegram Bot API는 webhook이 설정된 상태에서 `getUpdates` (long polling) 호출을 거부한다. 두 방식은 상호 배타적이므로 동시 사용이 불가능하다.
+
+- Telegram webhook → Lambda: **모든 메시지**를 Lambda가 수신
+- 컨테이너 미실행 시: "깨우는 중..." 응답 + 컨테이너 시작 + DynamoDB에 메시지 큐잉
+- 컨테이너 실행 중: Lambda → Bridge로 메시지 전달 (HTTP POST)
+- OpenClaw config에서 Telegram 채널 비활성화 (long polling 방지):
+  ```typescript
+  // patch-config.ts에서 Telegram 채널 제거
+  delete config.channels?.telegram;
+  ```
+- 장점: 단일 메시지 경로로 디버깅 용이, 컨테이너 다운 시에도 메시지 수신 가능
 
 #### 결정 4: 데이터 영속성 전략
 
@@ -100,7 +117,7 @@ graph TD
     CheckConfig -->|예| Patch
     Onboard --> Patch[Node.js로 config 패치\n채널/인증/모델 설정]
     Patch --> StartBridge[Bridge 서버 시작\n:8080]
-    StartBridge --> StartGW["openclaw gateway\n--port 18789 --bind lan"]
+    StartBridge --> StartGW["openclaw gateway\n--port 18789 --bind localhost"]
     StartGW --> Health[Bridge 헬스체크 대기]
     Health --> UpdateDDB[DynamoDB TaskState\n→ Running]
     UpdateDDB --> Ready[서비스 준비 완료]
@@ -112,9 +129,9 @@ graph TD
 #!/bin/bash
 set -e
 
-CONFIG_DIR="/root/.openclaw"
+CONFIG_DIR="/home/openclaw/.openclaw"
 CONFIG_FILE="$CONFIG_DIR/openclaw.json"
-WORKSPACE_DIR="/root/clawd"
+WORKSPACE_DIR="/home/openclaw/clawd"
 S3_BUCKET="${S3_DATA_BUCKET}"
 
 # ============================================================
@@ -132,11 +149,13 @@ fi
 # ============================================================
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "Running openclaw onboard..."
+    # --auth-choice env: API 키를 config에 기록하지 않고 환경 변수 참조
+    # (시크릿 디스크 미기록 원칙 — architecture.md 7.9 참조)
     openclaw onboard --non-interactive --accept-risk \
         --mode local \
-        --auth-choice apiKey --anthropic-api-key "$ANTHROPIC_API_KEY" \
+        --auth-choice env \
         --gateway-port 18789 \
-        --gateway-bind lan \
+        --gateway-bind localhost \
         --skip-channels \
         --skip-skills \
         --skip-health
@@ -155,7 +174,7 @@ node /app/bridge.js &
 BRIDGE_PID=$!
 
 echo "Starting OpenClaw Gateway..."
-exec openclaw gateway --port 18789 --verbose --allow-unconfigured --bind lan
+exec openclaw gateway --port 18789 --verbose --allow-unconfigured --bind localhost
 ```
 
 ### 2.2 Bridge 서버 상세 설계
@@ -179,12 +198,31 @@ import { OpenClawClient } from "./openclaw-client";
 import { CallbackSender } from "./callback";
 import { LifecycleManager } from "./lifecycle";
 
+// TLS: 자체 서명 인증서로 HTTPS 서버 구동 (Bearer 토큰 스니핑 방지)
+import https from "https";
+import { readFileSync } from "fs";
+
 const app = express();
 const ocClient = new OpenClawClient("ws://localhost:18789");
 const callback = new CallbackSender(process.env.WEBSOCKET_CALLBACK_URL);
 const lifecycle = new LifecycleManager();
 
+// ── 보안: Bearer 토큰 인증 미들웨어 ──
+// Bridge는 Public IP로 노출되므로 모든 요청에 인증 필수
+const BRIDGE_SECRET = process.env.BRIDGE_AUTH_TOKEN;
+app.use((req, res, next) => {
+  // /health는 ECS 헬스체크용으로 인증 면제
+  if (req.path === "/health") return next();
+  const token = req.headers.authorization?.replace("Bearer ", "");
+  if (!BRIDGE_SECRET || token !== BRIDGE_SECRET) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  next();
+});
+
 // POST /message - Lambda에서 메시지 수신
+// IDOR 방지: userId는 Lambda가 JWT/connectionId에서 검증한 값만 전달.
+// Bridge는 이 값을 그대로 사용하며, 클라이언트 입력을 직접 신뢰하지 않음.
 app.post("/message", async (req, res) => {
   const { userId, message, channel, connectionId, callbackUrl } = req.body;
 
@@ -208,14 +246,9 @@ app.post("/message", async (req, res) => {
   lifecycle.updateLastActivity();
 });
 
-// GET /health - 헬스체크
+// GET /health - 헬스체크 (인증 면제, 응답 최소화 — 내부 상태 노출 방지)
 app.get("/health", (req, res) => {
-  res.json({
-    status: "ok",
-    uptime: process.uptime(),
-    gatewayConnected: ocClient.isConnected(),
-    lastActivity: lifecycle.getLastActivity(),
-  });
+  res.json({ status: "ok" });
 });
 
 // POST /shutdown - Graceful shutdown
@@ -223,6 +256,41 @@ app.post("/shutdown", async (req, res) => {
   res.json({ status: "shutting_down" });
   await lifecycle.gracefulShutdown();
 });
+```
+
+#### OpenClaw Gateway WebSocket 프로토콜
+
+OpenClaw Gateway는 **JSON-RPC 2.0 / MCP (Model Context Protocol)** 기반 WebSocket 서버다. MoltWorker는 이 프로토콜을 해석하지 않고 브라우저 ↔ Gateway 간 WebSocket을 그대로 프록시한다. 우리 Bridge는 이 프로토콜을 직접 구현해야 한다.
+
+**연결 및 인증:**
+```
+ws://localhost:18789?token={MOLTBOT_GATEWAY_TOKEN}
+```
+- `?token=` 쿼리 파라미터로 Gateway 토큰 전달 (MoltWorker `index.ts:296` 참조)
+- 토큰 미전달 또는 불일치 시 연결 거부
+
+**메시지 형식 (JSON-RPC 2.0):**
+```json
+// 클라이언트 → Gateway: 메시지 전송
+{"jsonrpc": "2.0", "method": "sendMessage", "params": {"message": "Hello"}, "id": 1}
+
+// Gateway → 클라이언트: 스트리밍 응답 (notification, id 없음)
+{"jsonrpc": "2.0", "method": "streamChunk", "params": {"content": "응답 텍스트..."}}
+
+// Gateway → 클라이언트: 스트림 종료
+{"jsonrpc": "2.0", "method": "streamEnd", "params": {"fullResponse": "전체 응답"}}
+
+// Gateway → 클라이언트: 에러 (MoltWorker index.ts:364 참조)
+{"error": {"message": "에러 메시지"}}
+```
+
+> **주의**: 위 메시지 형식은 MoltWorker 프록시 코드와 MCP 명세에서 추론한 것이다. OpenClaw 버전에 따라 정확한 method 이름과 params 구조가 다를 수 있으므로, **구현 시 실제 Gateway의 WebSocket 트래픽을 캡처하여 검증**해야 한다.
+
+**Bridge의 프로토콜 어댑터 역할:**
+```
+Lambda (HTTP POST) → Bridge → JSON-RPC 2.0 변환 → Gateway (WebSocket)
+                              ← 스트리밍 청크 수신 ←
+Bridge → API Gateway @connections (HTTP POST) → Client (WebSocket)
 ```
 
 #### OpenClaw Gateway WebSocket 클라이언트
@@ -233,22 +301,81 @@ import WebSocket from "ws";
 
 export class OpenClawClient {
   private ws: WebSocket;
-  private sessions: Map<string, Session> = new Map();
+  private pending: Map<number, { resolve: Function; chunks: string[] }> = new Map();
+  private nextId = 1;
 
   constructor(private gatewayUrl: string) {
     this.connect();
   }
 
   private connect() {
-    this.ws = new WebSocket(this.gatewayUrl);
+    // Gateway 토큰을 쿼리 파라미터로 전달
+    const token = process.env.OPENCLAW_GATEWAY_TOKEN;
+    const url = token ? `${this.gatewayUrl}?token=${token}` : this.gatewayUrl;
+    this.ws = new WebSocket(url);
     this.ws.on("open", () => console.log("Connected to OpenClaw Gateway"));
-    this.ws.on("message", (data) => this.handleMessage(data));
+    this.ws.on("message", (raw) => this.handleMessage(raw));
     this.ws.on("close", () => setTimeout(() => this.connect(), 1000));
   }
 
-  async sendMessage(userId: string, message: string): AsyncIterable<string> {
-    // OpenClaw Gateway의 WebSocket RPC 프로토콜로 메시지 전송
-    // 스트리밍 응답을 AsyncIterable로 반환
+  private handleMessage(raw: WebSocket.Data) {
+    const data = JSON.parse(raw.toString());
+
+    // 스트리밍 청크 (notification — id 없음)
+    if (data.method === "streamChunk" && data.params?.requestId) {
+      const pending = this.pending.get(data.params.requestId);
+      if (pending) pending.chunks.push(data.params.content);
+      return;
+    }
+
+    // 스트림 종료
+    if (data.method === "streamEnd" && data.params?.requestId) {
+      const pending = this.pending.get(data.params.requestId);
+      if (pending) {
+        pending.resolve(pending.chunks);
+        this.pending.delete(data.params.requestId);
+      }
+      return;
+    }
+
+    // JSON-RPC 응답 (result 또는 error)
+    if (data.id && this.pending.has(data.id)) {
+      const pending = this.pending.get(data.id)!;
+      if (data.error) pending.resolve({ error: data.error });
+      // result는 streamEnd에서 처리
+    }
+  }
+
+  async *sendMessage(userId: string, message: string): AsyncGenerator<string> {
+    const id = this.nextId++;
+    const chunks: string[] = [];
+    let done = false;
+
+    this.pending.set(id, {
+      resolve: () => { done = true; },
+      chunks,
+    });
+
+    // JSON-RPC 2.0 형식으로 메시지 전송
+    this.ws.send(JSON.stringify({
+      jsonrpc: "2.0",
+      method: "sendMessage",
+      params: { message, userId },
+      id,
+    }));
+
+    // 청크가 쌓이면 yield, 종료 시 break
+    let lastIndex = 0;
+    while (!done) {
+      await new Promise((r) => setTimeout(r, 50));
+      while (lastIndex < chunks.length) {
+        yield chunks[lastIndex++];
+      }
+    }
+    // 남은 청크 모두 yield
+    while (lastIndex < chunks.length) {
+      yield chunks[lastIndex++];
+    }
   }
 }
 ```
@@ -298,24 +425,23 @@ sequenceDiagram
     Lambda->>DDB: TaskState 조회 (userId)
 
     alt 태스크 Running
-        Note over Lambda: taskIp 사용
+        Note over Lambda: publicIp 사용
+        Lambda->>Bridge: POST https://{publicIp}:8080/message
     else 태스크 없음/Idle
         Lambda-->>APIGW: { type: "status", status: "starting" }
         APIGW-->>Client: "에이전트를 깨우는 중..."
+        Lambda->>DDB: PendingMessages에 메시지 저장 (connectionId 포함)
         Lambda->>ECS: RunTask (Fargate Spot)
         Lambda->>DDB: TaskState → Starting
-        Note over Lambda: 비동기 처리 - Lambda 종료
+        Note over Lambda: Lambda 종료 (메시지는 DDB에 보존)
         Note over ECS,Bridge: Cold start ~30초-1분
-        Bridge->>DDB: TaskState → Running (taskIp 저장)
+        Bridge->>DDB: TaskState → Running (publicIp 저장)
+        Bridge->>DDB: PendingMessages 조회 (userId)
+        Bridge->>OC: 대기 중이던 메시지 전달
         Bridge-->>APIGW: @connections POST { type: "status", status: "running" }
         APIGW-->>Client: "에이전트 준비 완료"
+        Note over OC: 대기 메시지에 대한 응답 스트리밍 시작
     end
-
-    Note over Client: 사용자가 다시 메시지 전송
-    Client->>APIGW: 메시지 전송
-    APIGW->>Lambda: $default route
-    Lambda->>DDB: TaskState 조회 → Running, taskIp
-    Lambda->>Bridge: POST http://{taskIp}:8080/message
     Bridge->>OC: WebSocket RPC
     Bridge-->>Lambda: 202 Accepted
     OC->>OC: LLM 호출 + 처리
@@ -342,7 +468,7 @@ import {
 
 const ecs = new ECSClient({});
 
-export async function getTaskPrivateIP(
+export async function getTaskPublicIP(
   cluster: string,
   taskArn: string
 ): Promise<string | null> {
@@ -352,10 +478,21 @@ export async function getTaskPrivateIP(
   const task = response.tasks?.[0];
   if (!task?.attachments?.[0]?.details) return null;
 
-  const ipDetail = task.attachments[0].details.find(
-    (d) => d.name === "privateIPv4Address"
+  // Public IP가 할당된 Fargate 태스크에서는 ENI ID를 통해 Public IP를 조회
+  const eniDetail = task.attachments[0].details.find(
+    (d) => d.name === "networkInterfaceId"
   );
-  return ipDetail?.value || null;
+  if (!eniDetail?.value) return null;
+
+  // EC2 DescribeNetworkInterfaces로 Public IP 확인
+  const { EC2Client, DescribeNetworkInterfacesCommand } = await import("@aws-sdk/client-ec2");
+  const ec2 = new EC2Client({});
+  const eniResp = await ec2.send(
+    new DescribeNetworkInterfacesCommand({
+      NetworkInterfaceIds: [eniDetail.value],
+    })
+  );
+  return eniResp.NetworkInterfaces?.[0]?.Association?.PublicIp || null;
 }
 
 export async function startTask(params: {
@@ -368,7 +505,7 @@ export async function startTask(params: {
     new RunTaskCommand({
       cluster: params.cluster,
       taskDefinition: params.taskDefinition,
-      launchType: "FARGATE",
+      // launchType과 capacityProviderStrategy는 동시 지정 불가 — launchType 제거
       capacityProviderStrategy: [
         { capacityProvider: "FARGATE_SPOT", weight: 1 },
       ],
@@ -376,7 +513,7 @@ export async function startTask(params: {
         awsvpcConfiguration: {
           subnets: params.subnets,
           securityGroups: params.securityGroups,
-          assignPublicIp: "DISABLED",
+          assignPublicIp: "ENABLED",
         },
       },
       platformVersion: "LATEST",
@@ -440,8 +577,8 @@ export class LifecycleManager {
 
   async backupToS3(): Promise<void> {
     // OpenClaw config, workspace, skills를 S3에 동기화
-    const configDir = "/root/.openclaw";
-    const workspaceDir = "/root/clawd";
+    const configDir = "/home/openclaw/.openclaw";
+    const workspaceDir = "/home/openclaw/clawd";
     // aws s3 sync 실행 또는 SDK로 파일 업로드
   }
 
@@ -467,7 +604,7 @@ MoltWorker의 인라인 Node.js 패치 패턴을 직접 참조:
 // packages/container/src/patch-config.ts
 import fs from "fs";
 
-const CONFIG_PATH = "/root/.openclaw/openclaw.json";
+const CONFIG_PATH = "/home/openclaw/.openclaw/openclaw.json";
 
 let config: Record<string, any> = {};
 try {
@@ -481,26 +618,18 @@ config.gateway = config.gateway || {};
 config.gateway.port = 18789;
 config.gateway.mode = "local";
 
-// 인증 토큰 (MoltWorker의 OPENCLAW_GATEWAY_TOKEN 패턴)
-if (process.env.OPENCLAW_GATEWAY_TOKEN) {
-  config.gateway.auth = config.gateway.auth || {};
-  config.gateway.auth.token = process.env.OPENCLAW_GATEWAY_TOKEN;
-}
+// 인증: 환경 변수 참조 방식 (디스크에 토큰 미기록)
+// OpenClaw Gateway는 OPENCLAW_GATEWAY_TOKEN 환경 변수를 직접 읽음
+config.gateway.auth = { method: "env" };
+delete config.gateway?.auth?.token; // 기존 config에 토큰이 있으면 제거
 
-// LLM 프로바이더 설정
-if (process.env.ANTHROPIC_API_KEY) {
-  // OpenClaw이 환경 변수에서 직접 읽으므로 config 패치 불필요
-}
+// LLM 프로바이더: 환경 변수 참조 (ANTHROPIC_API_KEY를 config에 기록하지 않음)
+config.auth = { method: "env" };
+delete config.auth?.apiKey; // 기존 API 키가 있으면 제거
 
-// Telegram 채널 설정 (MoltWorker 패턴 참조)
-if (process.env.TELEGRAM_BOT_TOKEN) {
-  config.channels = config.channels || {};
-  config.channels.telegram = {
-    botToken: process.env.TELEGRAM_BOT_TOKEN,
-    enabled: true,
-    dmPolicy: "pairing",
-  };
-}
+// Telegram 채널 비활성화 (webhook-only 방식 — Lambda가 모든 메시지 처리)
+// OpenClaw의 내장 long polling을 사용하지 않으므로 채널 설정 제거
+delete config.channels?.telegram;
 
 // 모델 오버라이드
 if (process.env.LLM_MODEL) {
@@ -608,18 +737,24 @@ COPY packages/container/package*.json ./
 RUN npm ci --production
 COPY packages/container/dist/ ./
 
-# OpenClaw 디렉토리 생성 (MoltWorker 패턴)
-RUN mkdir -p /root/.openclaw \
-    && mkdir -p /root/clawd \
-    && mkdir -p /root/clawd/skills
+# 비root 사용자 생성 (컨테이너 탈출 시 권한 상승 방지)
+RUN groupadd -r openclaw && useradd -r -g openclaw -m -d /home/openclaw openclaw
+
+# OpenClaw 디렉토리 생성
+RUN mkdir -p /home/openclaw/.openclaw \
+    && mkdir -p /home/openclaw/clawd \
+    && mkdir -p /home/openclaw/clawd/skills \
+    && chown -R openclaw:openclaw /home/openclaw
 
 # 시작 스크립트 복사
 COPY packages/container/start-openclaw.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/start-openclaw.sh
 
-WORKDIR /root/clawd
+USER openclaw
+WORKDIR /home/openclaw/clawd
 
-EXPOSE 8080 18789
+# 8080만 노출 (Gateway 18789는 localhost 바인딩이므로 EXPOSE 불필요)
+EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
     CMD curl -f http://localhost:8080/health || exit 1
@@ -785,19 +920,18 @@ serverless-openclaw/
 
 ```
 packages/cdk/lib/stacks/
-├── network-stack.ts               # VPC, 서브넷, NAT, VPC Endpoints
+├── network-stack.ts               # VPC, 퍼블릭 서브넷, VPC Gateway Endpoints
 └── storage-stack.ts               # DynamoDB × 4, S3 × 2, ECR
 ```
 
 **NetworkStack 리소스:**
 - VPC (10.0.0.0/16)
-- 퍼블릭 서브넷 2개 (NAT Gateway용)
-- 프라이빗 서브넷 2개 (Fargate + Lambda)
-- NAT Gateway 1개 (비용 최적화: 단일 AZ)
+- 퍼블릭 서브넷 2개 (Fargate 태스크, Public IP 할당)
 - VPC Gateway Endpoints: DynamoDB, S3 (무료)
+- NAT Gateway 없음 (Fargate Public IP로 직접 인터넷 접근)
 
 **StorageStack 리소스:**
-- DynamoDB: Conversations, Settings, TaskState, Connections (PAY_PER_REQUEST)
+- DynamoDB: Conversations, Settings, TaskState, Connections, PendingMessages (PAY_PER_REQUEST)
 - S3: `serverless-openclaw-data` (OpenClaw 백업), `serverless-openclaw-web` (React SPA)
 - ECR: `serverless-openclaw` 리포지토리
 
@@ -867,7 +1001,7 @@ packages/gateway/src/
 **구현 순서:**
 1. `services/container.ts` — ECS RunTask, StopTask, DescribeTasks, getTaskIP
 2. `services/connections.ts` — connectionId CRUD (DynamoDB)
-3. `services/message.ts` — Bridge HTTP 호출 (`POST http://{taskIp}:8080/message`)
+3. `services/message.ts` — Bridge HTTP 호출 (`POST https://{publicIp}:8080/message`)
 4. `handlers/ws-connect.ts` — JWT 검증 + connectionId 저장
 5. `handlers/ws-message.ts` — TaskState 조회 → 컨테이너 시작/메시지 전달
 6. `handlers/ws-disconnect.ts` — connectionId 삭제
@@ -898,7 +1032,7 @@ packages/cdk/lib/stacks/
 2. REST API (Telegram webhook, 관리 API 8개 엔드포인트)
 3. Cognito Authorizer 연결
 4. Lambda 함수 6개 배포 (esbuild 번들링)
-5. Lambda VPC 배치 (프라이빗 서브넷)
+5. Lambda는 VPC 외부 배치 (공개 AWS endpoint 사용)
 6. IAM 역할/정책 연결
 7. EventBridge Rule (watchdog 5분 간격)
 
@@ -945,7 +1079,7 @@ packages/cdk/lib/stacks/
 4. IAM 역할 (task role, execution role)
 5. Secrets Manager → 컨테이너 환경 변수
 6. CloudWatch Logs 그룹
-7. 보안 그룹 (인바운드: Lambda SG에서 8080, 아웃바운드: 443)
+7. 보안 그룹 (인바운드: 8080 from 0.0.0.0/0 + Bridge 토큰 인증, 아웃바운드: 전체 허용)
 
 **검증**: `cdk deploy ComputeStack` + 수동 RunTask + /health 응답
 

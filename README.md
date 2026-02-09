@@ -43,7 +43,7 @@ AWS 서버리스 인프라에서 [OpenClaw](https://github.com/openclaw/openclaw
 - 시크릿 관리는 AWS Secrets Manager / SSM Parameter Store 사용
 - Fargate 컨테이너에 최소 권한 IAM 역할 적용
 - Telegram webhook에 secret token 검증으로 스푸핑 방지
-- VPC 내 프라이빗 서브넷에서 컨테이너 실행
+- 퍼블릭 서브넷 + 다층 방어 (Security Group + Bridge 토큰 인증 + TLS + localhost 바인딩)
 
 ## 아키텍처
 
@@ -137,6 +137,7 @@ Fargate Spot + API Gateway 조합으로 극한의 비용 최적화를 적용합�
 - [아키텍처 설계](docs/architecture.md)
 - [세부 설계 및 구현 계획](docs/implementation-plan.md)
 - [비용 최적화 분석](docs/cost-optimization.md)
+- [프로젝트 진행 계획](docs/progress.md)
 
 ## 라이선스
 
