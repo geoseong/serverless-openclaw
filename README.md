@@ -131,6 +131,18 @@ Fargate Spot + API Gateway 조합으로 극한의 비용 최적화를 적용합�
 
 상세 분석: [비용 최적화 문서](docs/cost-optimization.md)
 
+## Claude Code Skills
+
+개발 시 Claude Code에서 프로젝트 컨텍스트를 자동 로드하는 스킬을 제공합니다.
+
+| 스킬 | 호출 | 설명 |
+|------|------|------|
+| **context** | 자동 로드 | 프로젝트 개요, 기술 스택, 핵심 결정 |
+| **implement** | `/implement 1-3` | 특정 구현 단계 가이드 (목표, 산출물, 검증 기준) |
+| **architecture** | `/architecture` | 네트워크, 데이터 모델, CDK 스택 참조 |
+| **security** | `/security` | 보안 체크리스트 (Bridge 방어, IDOR, 시크릿) |
+| **cost** | `/cost` | 비용 목표 검증 (금지 리소스, 체크리스트) |
+
 ## 문서
 
 - [PRD (Product Requirements Document)](docs/PRD.md)
