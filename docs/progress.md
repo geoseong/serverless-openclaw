@@ -9,7 +9,7 @@ Serverless OpenClaw 프로젝트의 전체 진행 상황과 앞으로의 계획�
 | Phase | 설명 | 상태 |
 |-------|------|------|
 | **Phase 0** | 문서화 및 설계 | **완료** |
-| **Phase 1** | MVP 구현 (10단계) | **진행 중** (3/10) |
+| **Phase 1** | MVP 구현 (10단계) | **진행 중** (7/10) |
 | Phase 2 | 브라우저 자동화 + 커스텀 Skills | 미착수 |
 | Phase 3 | 고급 기능 (모니터링, 스케줄링, 멀티채널) | 미착수 |
 
@@ -109,10 +109,10 @@ graph TD
 | **1-1** | 프로젝트 초기화 | npm workspaces 모노레포, TypeScript 프로젝트 참조, CDK 스켈레톤, 공유 타입 | `npm install` + `npx tsc --build` 성공 | **완료** |
 | **1-2** | 인프라 기반 | NetworkStack (VPC, 퍼블릭 서브넷, VPC GW Endpoints), StorageStack (DDB 5개, S3 2개, ECR) | `cdk deploy NetworkStack StorageStack` 성공 | **완료** |
 | **1-3** | OpenClaw 컨테이너 | Dockerfile, start-openclaw.sh, Bridge 서버, OpenClawClient (JSON-RPC 2.0), Lifecycle Manager | 로컬 `docker build` + `docker run` + `/health` 응답 | **완료** |
-| **1-4** | Gateway Lambda | Lambda 6개 (ws-connect, ws-message, ws-disconnect, telegram-webhook, api-handler, watchdog), 서비스 모듈 5개 | 단위 테스트 (vitest) 통과 | 미착수 |
-| **1-5** | API Gateway | WebSocket API + REST API CDK, Cognito Authorizer, Lambda 배포, EventBridge Rule | `cdk deploy ApiStack` + WebSocket 연결 테스트 | 미착수 |
-| **1-6** | Cognito 인증 | AuthStack (User Pool, App Client, PKCE flow, 호스팅 도메인) | Cognito 테스트 사용자 + JWT 발급 확인 | 미착수 |
-| **1-7** | Compute | ComputeStack (ECS 클러스터, Fargate 태스크 정의, ARM64, FARGATE_SPOT, Secrets Manager) | `cdk deploy ComputeStack` + 수동 RunTask + `/health` 응답 | 미착수 |
+| **1-4** | Gateway Lambda | Lambda 6개 (ws-connect, ws-message, ws-disconnect, telegram-webhook, api-handler, watchdog), 서비스 모듈 5개 | 단위 테스트 (vitest) 통과 | **완료** |
+| **1-5** | API Gateway | WebSocket API + REST API CDK, Cognito Authorizer, Lambda 배포, EventBridge Rule | `cdk deploy ApiStack` + WebSocket 연결 테스트 | **완료** |
+| **1-6** | Cognito 인증 | AuthStack (User Pool, App Client, PKCE flow, 호스팅 도메인) | Cognito 테스트 사용자 + JWT 발급 확인 | **완료** |
+| **1-7** | Compute | ComputeStack (ECS 클러스터, Fargate 태스크 정의, ARM64, FARGATE_SPOT, Secrets Manager) | `cdk deploy ComputeStack` + 수동 RunTask + `/health` 응답 | **완료** |
 | **1-8** | 웹 채팅 UI | React SPA (Vite), Cognito 인증, WebSocket 클라이언트, 채팅 UI, Cold start 상태, WebStack CDK | 로컬 `npm run dev` + WebSocket + 메시지 송수신 | 미착수 |
 | **1-9** | Telegram 봇 | Webhook 등록, secret token 검증, 페어링 흐름, 메시지 라우팅, cold start 응답 | Telegram 메시지 → 응답 수신 | 미착수 |
 | **1-10** | 통합 테스트/문서화 | E2E 테스트, deployment.md, development.md | 클린 AWS 계정에서 `cdk deploy --all` 성공 | 미착수 |
@@ -128,6 +128,34 @@ graph TD
 | 3 | **1-5** API Gateway, **1-6** Cognito, **1-7** Compute | 1-2, 1-3, 1-4 완료 |
 | 4 | **1-8** 웹 UI, **1-9** Telegram | 1-5, 1-6 완료 |
 | 5 | **1-10** 통합 테스트 | 1-8, 1-9 완료 |
+
+### 1-4 Gateway Lambda 상세 (완료)
+
+| 구분 | 파일 | 설명 |
+|------|------|------|
+| **서비스** | `task-state.ts` | DDB TaskState 조회/저장, Idle 상태는 null 반환 |
+| | `connections.ts` | DDB Connections CRUD, 24시간 TTL |
+| | `conversations.ts` | DDB Conversations 조회 (역순, 기본 50건), 저장 |
+| | `container.ts` | ECS RunTask (`capacityProviderStrategy` only), getPublicIp (ENI 체인), StopTask |
+| | `message.ts` | 라우팅 로직: Running → Bridge HTTP, Starting → PendingMsg only, null → PendingMsg + RunTask |
+| **핸들러** | `ws-connect.ts` | JWT sub에서 userId 추출, connectionId 저장 |
+| | `ws-disconnect.ts` | connectionId 삭제 |
+| | `ws-message.ts` | sendMessage → routeMessage, getStatus → TaskState 반환 |
+| | `telegram-webhook.ts` | `X-Telegram-Bot-Api-Secret-Token` 검증, userId=`telegram:{fromId}` |
+| | `api-handler.ts` | GET /conversations, GET /status |
+| | `watchdog.ts` | 비활성 15분 초과 태스크 종료, 5분 미만 보호 |
+| **index.ts** | `src/index.ts` | 핸들러 6개 re-export |
+
+검증 결과:
+- 단위 테스트: 49개 (서비스 28 + 핸들러 21) 전체 통과
+- TypeScript 빌드: 통과
+- ESLint: 통과
+
+설계 패턴:
+- DI 패턴: `send` 함수 주입 (container 패키지와 동일)
+- AWS SDK send 바인딩: `ddb.send.bind(ddb) as (cmd: any) => Promise<any>`
+- userId 서버사이드만: JWT sub (웹) / `telegram:{fromId}` (Telegram)
+- IDOR 방지: 클라이언트 userId 절대 신뢰하지 않음
 
 ---
 

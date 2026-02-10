@@ -82,10 +82,10 @@ packages/
 - **Fargate Public IP 조회:** DescribeTasks → ENI ID → DescribeNetworkInterfaces → PublicIp
 - **OpenClaw 프로토콜:** JSON-RPC 2.0 / MCP over WebSocket, `?token=` 쿼리 인증
 
-## Phase 1 Progress (3/10)
+## Phase 1 Progress (7/10)
 
-완료: 1-1(프로젝트 초기화), 1-2(NetworkStack + StorageStack), 1-3(컨테이너)
-다음: 1-4(Gateway Lambda), 1-5(API Gateway), 1-6(Cognito), 1-7(Compute) — 병렬 가능
+완료: 1-1(프로젝트 초기화), 1-2(NetworkStack + StorageStack), 1-3(컨테이너), 1-4(Gateway Lambda), 1-5(API Gateway), 1-6(Cognito), 1-7(Compute)
+다음: 1-8(웹 UI), 1-9(Telegram), 1-10(통합 테스트)
 
 상세: `docs/progress.md` 참조. 구현 가이드: `/implement 1-{N}` 스킬 사용.
 
