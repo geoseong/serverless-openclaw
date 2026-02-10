@@ -12,12 +12,15 @@ Serverless OpenClaw — AWS 서버리스 인프라에서 OpenClaw AI 에이전�
 npm run build          # tsc --build (all packages via project references)
 npm run lint           # eslint "packages/**/*.ts"
 npm run format         # prettier
-npm run test           # vitest run
+npm run test           # vitest run (단위 테스트)
+npm run test:e2e       # vitest e2e (E2E 테스트)
 
 # CDK
 cd packages/cdk && npx cdk synth       # CloudFormation 생성
 cd packages/cdk && npx cdk deploy      # AWS 배포
 ```
+
+**Git Hooks** (husky): pre-commit → build + lint + UT, pre-push → E2E 테스트
 
 TypeScript: ES2022, Node16 module resolution, strict, composite builds. import 경로에 `.js` 확장자 필수.
 
@@ -62,6 +65,16 @@ packages/
 
 테이블명은 `@serverless-openclaw/shared`의 `TABLE_NAMES` 상수 사용.
 
+## Development Rules
+
+- **TDD 필수** — UI(web 패키지)를 제외한 모든 구현은 테스트를 먼저 작성한 후 구현한다
+- **Git Hooks:**
+  - `pre-commit`: 단위 테스트(vitest) + lint(eslint) 통과 필수
+  - `pre-push`: E2E 테스트 통과 필수
+- **E2E 테스트 배포:**
+  - 로컬: AWS 프로필 정보는 `.env` 파일로 관리 (`.gitignore`에 포함)
+  - CI: GitHub Actions + OIDC 인증 연동으로 AWS 배포
+
 ## Key Design Patterns
 
 - **Cold Start 메시지 큐잉:** 컨테이너 기동 중 메시지 → PendingMessages DDB 저장 → Bridge 시작 후 소비 (5분 TTL)
@@ -69,10 +82,10 @@ packages/
 - **Fargate Public IP 조회:** DescribeTasks → ENI ID → DescribeNetworkInterfaces → PublicIp
 - **OpenClaw 프로토콜:** JSON-RPC 2.0 / MCP over WebSocket, `?token=` 쿼리 인증
 
-## Phase 1 Progress (2/10)
+## Phase 1 Progress (3/10)
 
-완료: 1-1(프로젝트 초기화), 1-2(NetworkStack + StorageStack)
-다음: 1-3(컨테이너), 1-4(Gateway Lambda), 1-5(API Gateway) — 병렬 가능
+완료: 1-1(프로젝트 초기화), 1-2(NetworkStack + StorageStack), 1-3(컨테이너)
+다음: 1-4(Gateway Lambda), 1-5(API Gateway), 1-6(Cognito), 1-7(Compute) — 병렬 가능
 
 상세: `docs/progress.md` 참조. 구현 가이드: `/implement 1-{N}` 스킬 사용.
 

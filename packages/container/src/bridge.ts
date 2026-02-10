@@ -1,0 +1,87 @@
+import express from "express";
+import { createAuthMiddleware } from "./auth-middleware.js";
+import type { BridgeMessageRequest, ServerMessage } from "@serverless-openclaw/shared";
+
+export interface BridgeDeps {
+  authToken: string;
+  openclawClient: {
+    sendMessage(userId: string, message: string): AsyncGenerator<string>;
+    close(): void;
+  };
+  callbackSender: {
+    send(connectionId: string, data: ServerMessage): Promise<void>;
+  };
+  lifecycle: {
+    updateTaskState(status: string, publicIp?: string): Promise<void>;
+    gracefulShutdown(): Promise<void>;
+    updateLastActivity(): void;
+    lastActivityTime: Date;
+  };
+}
+
+const startTime = Date.now();
+
+export function createApp(deps: BridgeDeps): express.Express {
+  const app = express();
+
+  app.use(express.json());
+  app.use(createAuthMiddleware(deps.authToken));
+
+  app.get("/health", (_req, res) => {
+    res.json({ status: "ok" });
+  });
+
+  app.post("/message", (req, res) => {
+    const body = req.body as Partial<BridgeMessageRequest>;
+
+    if (!body.userId || !body.message || !body.channel || !body.connectionId || !body.callbackUrl) {
+      res.status(400).json({ error: "Missing required fields" });
+      return;
+    }
+
+    deps.lifecycle.updateLastActivity();
+
+    // Respond immediately, process asynchronously
+    res.status(202).json({ status: "processing" });
+
+    // Fire-and-forget async processing
+    void (async () => {
+      try {
+        const generator = deps.openclawClient.sendMessage(
+          body.userId!,
+          body.message!,
+        );
+        for await (const chunk of generator) {
+          await deps.callbackSender.send(body.connectionId!, {
+            type: "stream_chunk",
+            content: chunk,
+            conversationId: undefined,
+          });
+        }
+        await deps.callbackSender.send(body.connectionId!, {
+          type: "stream_end",
+        });
+      } catch (err) {
+        await deps.callbackSender.send(body.connectionId!, {
+          type: "error",
+          error: err instanceof Error ? err.message : "Unknown error",
+        }).catch(() => {});
+      }
+    })();
+  });
+
+  app.get("/status", (_req, res) => {
+    res.json({
+      status: "running",
+      uptime: Math.floor((Date.now() - startTime) / 1000),
+      lastActivity: deps.lifecycle.lastActivityTime.toISOString(),
+    });
+  });
+
+  app.post("/shutdown", (_req, res) => {
+    res.json({ status: "shutting_down" });
+    void deps.lifecycle.gracefulShutdown();
+  });
+
+  return app;
+}

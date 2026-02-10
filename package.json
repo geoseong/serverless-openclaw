@@ -1,20 +1,25 @@
 {
   "name": "serverless-openclaw",
   "private": true,
-  "workspaces": ["packages/*"],
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "build": "tsc --build",
-    "lint": "eslint packages/",
+    "lint": "eslint \"packages/**/*.ts\"",
     "format": "prettier --write \"packages/*/src/**/*.ts\"",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "prepare": "husky"
   },
   "devDependencies": {
-    "typescript": "~5.7.0",
-    "eslint": "^9.0.0",
     "@eslint/js": "^9.0.0",
-    "typescript-eslint": "^8.0.0",
+    "eslint": "^9.0.0",
+    "husky": "^9.1.7",
     "prettier": "^3.4.0",
-    "vitest": "^3.0.0",
-    "tsx": "^4.19.0"
+    "tsx": "^4.19.0",
+    "typescript": "~5.7.0",
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^3.0.0"
   }
 }

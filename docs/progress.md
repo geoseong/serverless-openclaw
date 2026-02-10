@@ -9,7 +9,7 @@ Serverless OpenClaw 프로젝트의 전체 진행 상황과 앞으로의 계획�
 | Phase | 설명 | 상태 |
 |-------|------|------|
 | **Phase 0** | 문서화 및 설계 | **완료** |
-| **Phase 1** | MVP 구현 (10단계) | **진행 중** (2/10) |
+| **Phase 1** | MVP 구현 (10단계) | **진행 중** (3/10) |
 | Phase 2 | 브라우저 자동화 + 커스텀 Skills | 미착수 |
 | Phase 3 | 고급 기능 (모니터링, 스케줄링, 멀티채널) | 미착수 |
 
@@ -108,7 +108,7 @@ graph TD
 |------|------|------------|----------|------|
 | **1-1** | 프로젝트 초기화 | npm workspaces 모노레포, TypeScript 프로젝트 참조, CDK 스켈레톤, 공유 타입 | `npm install` + `npx tsc --build` 성공 | **완료** |
 | **1-2** | 인프라 기반 | NetworkStack (VPC, 퍼블릭 서브넷, VPC GW Endpoints), StorageStack (DDB 5개, S3 2개, ECR) | `cdk deploy NetworkStack StorageStack` 성공 | **완료** |
-| **1-3** | OpenClaw 컨테이너 | Dockerfile, start-openclaw.sh, Bridge 서버, OpenClawClient (JSON-RPC 2.0), Lifecycle Manager | 로컬 `docker build` + `docker run` + `/health` 응답 | 미착수 |
+| **1-3** | OpenClaw 컨테이너 | Dockerfile, start-openclaw.sh, Bridge 서버, OpenClawClient (JSON-RPC 2.0), Lifecycle Manager | 로컬 `docker build` + `docker run` + `/health` 응답 | **완료** |
 | **1-4** | Gateway Lambda | Lambda 6개 (ws-connect, ws-message, ws-disconnect, telegram-webhook, api-handler, watchdog), 서비스 모듈 5개 | 단위 테스트 (vitest) 통과 | 미착수 |
 | **1-5** | API Gateway | WebSocket API + REST API CDK, Cognito Authorizer, Lambda 배포, EventBridge Rule | `cdk deploy ApiStack` + WebSocket 연결 테스트 | 미착수 |
 | **1-6** | Cognito 인증 | AuthStack (User Pool, App Client, PKCE flow, 호스팅 도메인) | Cognito 테스트 사용자 + JWT 발급 확인 | 미착수 |
@@ -163,3 +163,6 @@ graph TD
 | Gateway 프로토콜 | JSON-RPC 2.0 / MCP over WebSocket | MoltWorker 분석 + Perplexity 조사 결과 확인 |
 | 시크릿 관리 | Secrets Manager → 환경변수 only | 디스크/config 파일에 절대 미기록 |
 | Bridge 보안 | 6계층 방어 | SG, Bearer 토큰, TLS, localhost, non-root, Secrets Manager |
+| 개발 방법론 | TDD (UI 제외) | 테스트 먼저 작성 후 구현, vitest 사용 |
+| Git Hooks | pre-commit: UT + lint, pre-push: E2E | husky로 관리 |
+| E2E 배포 | 로컬(.env) + GitHub Actions(OIDC) | AWS 프로필은 .env, CI는 OIDC 인증 연동 |

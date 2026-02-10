@@ -6,6 +6,7 @@
   "types": "dist/index.d.ts",
   "scripts": { "build": "tsc", "test": "vitest run" },
   "dependencies": {
+    "@serverless-openclaw/shared": "*",
     "express": "^5.1.0",
     "ws": "^8.18.0",
     "@aws-sdk/client-dynamodb": "^3.700.0",
@@ -15,6 +16,8 @@
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
-    "@types/ws": "^8.5.0"
+    "@types/ws": "^8.5.0",
+    "@types/supertest": "^6.0.0",
+    "supertest": "^7.0.0"
   }
 }
