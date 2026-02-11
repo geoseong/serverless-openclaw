@@ -1,89 +1,89 @@
-# 프로젝트 진행 계획
+# Project Progress Plan
 
-Serverless OpenClaw 프로젝트의 전체 진행 상황과 앞으로의 계획을 추적하는 문서.
-
----
-
-## 진행 현황 요약
-
-| Phase | 설명 | 상태 |
-|-------|------|------|
-| **Phase 0** | 문서화 및 설계 | **완료** |
-| **Phase 1** | MVP 구현 (10단계) | **완료** (10/10) |
-| Phase 2 | 브라우저 자동화 + 커스텀 Skills | 미착수 |
-| Phase 3 | 고급 기능 (모니터링, 스케줄링, 멀티채널) | 미착수 |
+A document tracking the overall progress and future plans for the Serverless OpenClaw project.
 
 ---
 
-## Phase 0: 문서화 및 설계 (완료)
+## Progress Summary
 
-### 0-1. 초기 문서 작성 (완료)
+| Phase | Description | Status |
+|-------|-------------|--------|
+| **Phase 0** | Documentation & Design | **Complete** |
+| **Phase 1** | MVP Implementation (10 steps) | **Complete** (10/10) |
+| Phase 2 | Browser Automation + Custom Skills | Not started |
+| Phase 3 | Advanced Features (Monitoring, Scheduling, Multi-channel) | Not started |
 
-| 문서 | 설명 | 커밋 |
-|------|------|------|
-| [PRD.md](PRD.md) | 프로젝트 요구사항 정의 | `80d6f20` |
-| [README.md](../README.md) | 프로젝트 개요 | `a04562f` |
-| [cost-optimization.md](cost-optimization.md) | 비용 최적화 분석 | `d08acd1` |
-| [architecture.md](architecture.md) | 상세 아키텍처 설계 | `6d27541` |
-| [implementation-plan.md](implementation-plan.md) | MoltWorker 참조 기반 세부 설계 + 구현 계획 | `3deecd2` |
+---
 
-### 0-2. 설계 리뷰 및 보완 (완료, 미커밋)
+## Phase 0: Documentation & Design (Complete)
 
-`/review` 수행 후 발견된 P0/P1 이슈 및 보안 항목을 모두 반영.
+### 0-1. Initial Documentation (Complete)
 
-#### P0 (Blocker) — 3건 해결
+| Document | Description | Commit |
+|----------|-------------|--------|
+| [PRD.md](PRD.md) | Product requirements definition | `80d6f20` |
+| [README.md](../README.md) | Project overview | `a04562f` |
+| [cost-optimization.md](cost-optimization.md) | Cost optimization analysis | `d08acd1` |
+| [architecture.md](architecture.md) | Detailed architecture design | `6d27541` |
+| [implementation-plan.md](implementation-plan.md) | Detailed design + implementation plan based on MoltWorker reference | `3deecd2` |
 
-| ID | 이슈 | 해결 내용 | 수정 파일 |
-|----|------|----------|----------|
-| P0-1 | NAT Gateway 비용 ($32/월) | Fargate Public IP + Lambda VPC 외부 + VPC Gateway Endpoints (DynamoDB, S3) | architecture, implementation-plan, cost-optimization, README |
-| P0-2 | OpenClaw WS 프로토콜 미명세 | JSON-RPC 2.0 / MCP over WebSocket, `?token=` 인증 문서화. OpenClawClient 코드 전면 재작성 | implementation-plan |
-| P0-3 | RunTask API 파라미터 충돌 | `launchType`과 `capacityProviderStrategy` 동시 지정 불가 — `capacityProviderStrategy`만 사용 | implementation-plan |
+### 0-2. Design Review & Improvements (Complete, uncommitted)
 
-#### P1 (Critical) — 3건 해결
+All P0/P1 issues and security items discovered after performing `/review` have been addressed.
 
-| ID | 이슈 | 해결 내용 | 수정 파일 |
-|----|------|----------|----------|
-| P1-1 | Telegram webhook + long polling 충돌 | Telegram API는 webhook 설정 시 getUpdates 거부 — Webhook-only 방식으로 변경 | implementation-plan |
-| P1-2 | Lambda VPC 배치 모순 | Lambda는 VPC 외부 배치 (공개 AWS endpoint 사용)로 통일 | architecture, implementation-plan |
-| P1-3 | Cold start 메시지 유실 | PendingMessages DynamoDB 테이블 추가 (5분 TTL). Lambda가 저장 → Bridge가 기동 후 소비 | architecture, implementation-plan, PRD |
+#### P0 (Blocker) — 3 issues resolved
 
-#### 보안 — 5건 해결
+| ID | Issue | Resolution | Modified Files |
+|----|-------|------------|----------------|
+| P0-1 | NAT Gateway cost ($32/month) | Fargate Public IP + Lambda outside VPC + VPC Gateway Endpoints (DynamoDB, S3) | architecture, implementation-plan, cost-optimization, README |
+| P0-2 | OpenClaw WS protocol unspecified | Documented JSON-RPC 2.0 / MCP over WebSocket with `?token=` auth. Complete rewrite of OpenClawClient code | implementation-plan |
+| P0-3 | RunTask API parameter conflict | `launchType` and `capacityProviderStrategy` cannot be specified simultaneously — using `capacityProviderStrategy` only | implementation-plan |
 
-| 항목 | 해결 내용 | 수정 파일 |
-|------|----------|----------|
-| Bridge 6계층 방어 | SG → Bearer 토큰 → TLS (self-signed, Phase 1) → localhost 바인딩 → non-root → Secrets Manager | architecture |
-| /health 최소 정보 노출 | `{"status":"ok"}` 만 반환, 버전/시스템 정보 제거 | implementation-plan |
-| IDOR 방지 | 4계층 userId 검증 (Lambda JWT, Bridge Lambda-only 신뢰, REST jwt.sub, Telegram 페어링 검증) | architecture (7.8) |
-| 시크릿 디스크 미기록 | `openclaw.json`에 API 키/토큰 미기록. `--auth-choice env`로 환경변수만 사용 | architecture (7.9), implementation-plan |
-| CLI 토큰 노출 방지 | config 파치에서 gateway 토큰 삭제, Telegram 채널 설정 삭제 | implementation-plan |
+#### P1 (Critical) — 3 issues resolved
 
-#### 기타 정합성 수정
+| ID | Issue | Resolution | Modified Files |
+|----|-------|------------|----------------|
+| P1-1 | Telegram webhook + long polling conflict | Telegram API rejects getUpdates when webhook is set — switched to webhook-only approach | implementation-plan |
+| P1-2 | Lambda VPC placement contradiction | Unified Lambda placement outside VPC (using public AWS endpoints) | architecture, implementation-plan |
+| P1-3 | Cold start message loss | Added PendingMessages DynamoDB table (5-min TTL). Lambda stores messages, Bridge consumes them after startup | architecture, implementation-plan, PRD |
 
-- README: "프라이빗 서브넷" → "퍼블릭 서브넷 + 다층 방어"
-- 모든 `http://{publicIp}` → `https://{publicIp}`
-- PRD DynamoDB 테이블: 3개 → 5개 (Connections, PendingMessages 추가)
+#### Security — 5 items resolved
+
+| Item | Resolution | Modified Files |
+|------|------------|----------------|
+| Bridge 6-layer defense | SG → Bearer token → TLS (self-signed, Phase 1) → localhost binding → non-root → Secrets Manager | architecture |
+| /health minimal info exposure | Return only `{"status":"ok"}`, removed version/system info | implementation-plan |
+| IDOR prevention | 4-layer userId verification (Lambda JWT, Bridge Lambda-only trust, REST jwt.sub, Telegram pairing verification) | architecture (7.8) |
+| No secrets written to disk | API keys/tokens not stored in `openclaw.json`. Use `--auth-choice env` for environment variables only | architecture (7.9), implementation-plan |
+| CLI token exposure prevention | Removed gateway token from config patch, removed Telegram channel settings | implementation-plan |
+
+#### Other consistency fixes
+
+- README: "private subnet" → "public subnet + multi-layer defense"
+- All `http://{publicIp}` → `https://{publicIp}`
+- PRD DynamoDB tables: 3 → 5 (added Connections, PendingMessages)
 - TaskState PK: `taskId` → `userId`
 
 ---
 
-## Phase 1: MVP 구현 (완료)
+## Phase 1: MVP Implementation (Complete)
 
-10단계로 구성. 각 단계는 이전 단계의 결과물에 의존한다.
+Consists of 10 steps. Each step depends on the results of the previous steps.
 
-### 의존 관계
+### Dependency Graph
 
 ```mermaid
 graph TD
-    S1["1-1 프로젝트 초기화"]
-    S2["1-2 인프라 기반"]
-    S3["1-3 OpenClaw 컨테이너"]
+    S1["1-1 Project Init"]
+    S2["1-2 Infrastructure Base"]
+    S3["1-3 OpenClaw Container"]
     S4["1-4 Gateway Lambda"]
     S5["1-5 API Gateway"]
-    S6["1-6 Cognito 인증"]
+    S6["1-6 Cognito Auth"]
     S7["1-7 Compute"]
-    S8["1-8 웹 채팅 UI"]
-    S9["1-9 Telegram 봇"]
-    S10["1-10 통합 테스트"]
+    S8["1-8 Web Chat UI"]
+    S9["1-9 Telegram Bot"]
+    S10["1-10 Integration Tests"]
 
     S1 --> S2
     S1 --> S3
@@ -102,172 +102,172 @@ graph TD
     S9 --> S10
 ```
 
-### 단계별 상세
+### Step-by-Step Details
 
-| 단계 | 목표 | 주요 산출물 | 검증 기준 | 상태 |
-|------|------|------------|----------|------|
-| **1-1** | 프로젝트 초기화 | npm workspaces 모노레포, TypeScript 프로젝트 참조, CDK 스켈레톤, 공유 타입 | `npm install` + `npx tsc --build` 성공 | **완료** |
-| **1-2** | 인프라 기반 | NetworkStack (VPC, 퍼블릭 서브넷, VPC GW Endpoints), StorageStack (DDB 5개, S3 2개, ECR) | `cdk deploy NetworkStack StorageStack` 성공 | **완료** |
-| **1-3** | OpenClaw 컨테이너 | Dockerfile, start-openclaw.sh, Bridge 서버, OpenClawClient (JSON-RPC 2.0), Lifecycle Manager | 로컬 `docker build` + `docker run` + `/health` 응답 | **완료** |
-| **1-4** | Gateway Lambda | Lambda 6개 (ws-connect, ws-message, ws-disconnect, telegram-webhook, api-handler, watchdog), 서비스 모듈 5개 | 단위 테스트 (vitest) 통과 | **완료** |
-| **1-5** | API Gateway | WebSocket API + REST API CDK, Cognito Authorizer, Lambda 배포, EventBridge Rule | `cdk deploy ApiStack` + WebSocket 연결 테스트 | **완료** |
-| **1-6** | Cognito 인증 | AuthStack (User Pool, App Client, PKCE flow, 호스팅 도메인) | Cognito 테스트 사용자 + JWT 발급 확인 | **완료** |
-| **1-7** | Compute | ComputeStack (ECS 클러스터, Fargate 태스크 정의, ARM64, FARGATE_SPOT, Secrets Manager) | `cdk deploy ComputeStack` + 수동 RunTask + `/health` 응답 | **완료** |
-| **1-8** | 웹 채팅 UI | React SPA (Vite), Cognito 인증, WebSocket 클라이언트, 채팅 UI, Cold start 상태, WebStack CDK | 로컬 `npm run dev` + WebSocket + 메시지 송수신 | **완료** |
-| **1-9** | Telegram 봇 | Webhook 등록, secret token 검증, 메시지 라우팅, cold start 응답, Bot API sendMessage | Telegram 메시지 → 응답 수신 | **완료** |
-| **1-10** | 통합 테스트/문서화 | E2E 테스트, deployment.md, development.md | 클린 AWS 계정에서 `cdk deploy --all` 성공 | **완료** |
+| Step | Goal | Key Deliverables | Verification Criteria | Status |
+|------|------|-----------------|----------------------|--------|
+| **1-1** | Project initialization | npm workspaces monorepo, TypeScript project references, CDK skeleton, shared types | `npm install` + `npx tsc --build` succeeds | **Complete** |
+| **1-2** | Infrastructure base | NetworkStack (VPC, public subnets, VPC GW Endpoints), StorageStack (5 DDB tables, 2 S3 buckets, ECR) | `cdk deploy NetworkStack StorageStack` succeeds | **Complete** |
+| **1-3** | OpenClaw container | Dockerfile, start-openclaw.sh, Bridge server, OpenClawClient (JSON-RPC 2.0), Lifecycle Manager | Local `docker build` + `docker run` + `/health` response | **Complete** |
+| **1-4** | Gateway Lambda | 6 Lambda functions (ws-connect, ws-message, ws-disconnect, telegram-webhook, api-handler, watchdog), 5 service modules | Unit tests (vitest) pass | **Complete** |
+| **1-5** | API Gateway | WebSocket API + REST API CDK, Cognito Authorizer, Lambda deployment, EventBridge Rule | `cdk deploy ApiStack` + WebSocket connection test | **Complete** |
+| **1-6** | Cognito auth | AuthStack (User Pool, App Client, PKCE flow, hosted domain) | Cognito test user + JWT issuance verified | **Complete** |
+| **1-7** | Compute | ComputeStack (ECS cluster, Fargate task definition, ARM64, FARGATE_SPOT, Secrets Manager) | `cdk deploy ComputeStack` + manual RunTask + `/health` response | **Complete** |
+| **1-8** | Web chat UI | React SPA (Vite), Cognito auth, WebSocket client, chat UI, cold start status, WebStack CDK | Local `npm run dev` + WebSocket + message send/receive | **Complete** |
+| **1-9** | Telegram bot | Webhook registration, secret token verification, message routing, cold start response, Bot API sendMessage | Telegram message → response received | **Complete** |
+| **1-10** | Integration tests/docs | E2E tests, deployment.md, development.md | `cdk deploy --all` succeeds on a clean AWS account | **Complete** |
 
-### 병렬 구현 가능 그룹
+### Parallel Implementation Groups
 
-의존 관계 기반으로 최대 병렬화할 수 있는 작업 그룹:
+Work groups that can be maximally parallelized based on dependencies:
 
-| 순서 | 병렬 실행 가능 단계 | 선행 조건 |
-|------|-------------------|----------|
-| 1 | **1-1** 프로젝트 초기화 | 없음 |
-| 2 | **1-2** 인프라, **1-3** 컨테이너, **1-4** Gateway Lambda | 1-1 완료 |
-| 3 | **1-5** API Gateway, **1-6** Cognito, **1-7** Compute | 1-2, 1-3, 1-4 완료 |
-| 4 | **1-8** 웹 UI, **1-9** Telegram | 1-5, 1-6 완료 |
-| 5 | **1-10** 통합 테스트 | 1-8, 1-9 완료 |
+| Order | Parallelizable Steps | Prerequisites |
+|-------|---------------------|---------------|
+| 1 | **1-1** Project initialization | None |
+| 2 | **1-2** Infrastructure, **1-3** Container, **1-4** Gateway Lambda | 1-1 complete |
+| 3 | **1-5** API Gateway, **1-6** Cognito, **1-7** Compute | 1-2, 1-3, 1-4 complete |
+| 4 | **1-8** Web UI, **1-9** Telegram | 1-5, 1-6 complete |
+| 5 | **1-10** Integration tests | 1-8, 1-9 complete |
 
-### 1-4 Gateway Lambda 상세 (완료)
+### 1-4 Gateway Lambda Details (Complete)
 
-| 구분 | 파일 | 설명 |
-|------|------|------|
-| **서비스** | `task-state.ts` | DDB TaskState 조회/저장, Idle 상태는 null 반환 |
-| | `connections.ts` | DDB Connections CRUD, 24시간 TTL |
-| | `conversations.ts` | DDB Conversations 조회 (역순, 기본 50건), 저장 |
-| | `container.ts` | ECS RunTask (`capacityProviderStrategy` only), getPublicIp (ENI 체인), StopTask |
-| | `message.ts` | 라우팅 로직: Running → Bridge HTTP, Starting → PendingMsg only, null → PendingMsg + RunTask |
-| **핸들러** | `ws-connect.ts` | JWT sub에서 userId 추출, connectionId 저장 |
-| | `ws-disconnect.ts` | connectionId 삭제 |
-| | `ws-message.ts` | sendMessage → routeMessage, getStatus → TaskState 반환 |
-| | `telegram-webhook.ts` | `X-Telegram-Bot-Api-Secret-Token` 검증, userId=`telegram:{fromId}` |
+| Category | File | Description |
+|----------|------|-------------|
+| **Service** | `task-state.ts` | DDB TaskState query/save, returns null for Idle state |
+| | `connections.ts` | DDB Connections CRUD, 24-hour TTL |
+| | `conversations.ts` | DDB Conversations query (reverse order, default 50 items), save |
+| | `container.ts` | ECS RunTask (`capacityProviderStrategy` only), getPublicIp (ENI chain), StopTask |
+| | `message.ts` | Routing logic: Running → Bridge HTTP, Starting → PendingMsg only, null → PendingMsg + RunTask |
+| **Handler** | `ws-connect.ts` | Extract userId from JWT sub, save connectionId |
+| | `ws-disconnect.ts` | Delete connectionId |
+| | `ws-message.ts` | sendMessage → routeMessage, getStatus → return TaskState |
+| | `telegram-webhook.ts` | `X-Telegram-Bot-Api-Secret-Token` verification, userId=`telegram:{fromId}` |
 | | `api-handler.ts` | GET /conversations, GET /status |
-| | `watchdog.ts` | 비활성 15분 초과 태스크 종료, 5분 미만 보호 |
-| **index.ts** | `src/index.ts` | 핸들러 6개 re-export |
+| | `watchdog.ts` | Terminate tasks inactive for over 15 minutes, protect tasks under 5 minutes |
+| **index.ts** | `src/index.ts` | Re-export of all 6 handlers |
 
-검증 결과:
-- 단위 테스트: 49개 (서비스 28 + 핸들러 21) 전체 통과
-- TypeScript 빌드: 통과
-- ESLint: 통과
+Verification results:
+- Unit tests: 49 total (28 services + 21 handlers), all passing
+- TypeScript build: passing
+- ESLint: passing
 
-설계 패턴:
-- DI 패턴: `send` 함수 주입 (container 패키지와 동일)
-- AWS SDK send 바인딩: `ddb.send.bind(ddb) as (cmd: any) => Promise<any>`
-- userId 서버사이드만: JWT sub (웹) / `telegram:{fromId}` (Telegram)
-- IDOR 방지: 클라이언트 userId 절대 신뢰하지 않음
+Design patterns:
+- DI pattern: `send` function injection (same as container package)
+- AWS SDK send binding: `ddb.send.bind(ddb) as (cmd: any) => Promise<any>`
+- Server-side userId only: JWT sub (web) / `telegram:{fromId}` (Telegram)
+- IDOR prevention: never trust client-provided userId
 
-### 1-8 웹 채팅 UI 상세 (완료)
+### 1-8 Web Chat UI Details (Complete)
 
-| 구분 | 파일 | 설명 |
-|------|------|------|
-| **프로젝트 설정** | `index.html` | Vite 엔트리 포인트 |
+| Category | File | Description |
+|----------|------|-------------|
+| **Project Setup** | `index.html` | Vite entry point |
 | | `vite.config.ts` | `@vitejs/plugin-react`, `VITE_` prefix |
-| | `vite-env.d.ts` | 환경변수 타입 선언 (WS_URL, API_URL, COGNITO_*) |
-| **인증** | `services/auth.ts` | Cognito SRP 인증 래퍼 (signIn/signUp/confirmSignUp/signOut/getSession) |
-| | `hooks/useAuth.ts` | 인증 상태 훅 (세션 복구, 에러 처리) |
-| | `components/Auth/AuthProvider.tsx` | React Context 인증 전역 제공 |
-| | `components/Auth/LoginForm.tsx` | 로그인/회원가입/인증코드 확인 폼 |
-| **WebSocket** | `services/websocket.ts` | WebSocketClient 클래스 (자동 재연결, 지수 백오프, 하트비트) |
-| | `hooks/useWebSocket.ts` | WS 연결 훅 (메시지/스트리밍/상태 관리) |
+| | `vite-env.d.ts` | Environment variable type declarations (WS_URL, API_URL, COGNITO_*) |
+| **Auth** | `services/auth.ts` | Cognito SRP auth wrapper (signIn/signUp/confirmSignUp/signOut/getSession) |
+| | `hooks/useAuth.ts` | Auth state hook (session recovery, error handling) |
+| | `components/Auth/AuthProvider.tsx` | React Context global auth provider |
+| | `components/Auth/LoginForm.tsx` | Login/signup/verification code form |
+| **WebSocket** | `services/websocket.ts` | WebSocketClient class (auto-reconnect, exponential backoff, heartbeat) |
+| | `hooks/useWebSocket.ts` | WS connection hook (message/streaming/state management) |
 | **REST API** | `services/api.ts` | fetchConversations, fetchStatus |
-| **채팅 UI** | `components/Chat/ChatContainer.tsx` | 메인 레이아웃 (AgentStatus + MessageList + MessageInput) |
-| | `components/Chat/MessageList.tsx` | 메시지 목록 (자동 스크롤, 스트리밍 커서) |
-| | `components/Chat/MessageInput.tsx` | 입력 (Enter 전송, Shift+Enter 줄바꿈, 자동 높이) |
-| | `components/Status/AgentStatus.tsx` | 에이전트 상태 표시 (Idle/Starting/Running/Stopping) |
-| **CDK** | `web-stack.ts` | S3 버킷 + CloudFront (OAC, SPA 라우팅, BucketDeployment) |
+| **Chat UI** | `components/Chat/ChatContainer.tsx` | Main layout (AgentStatus + MessageList + MessageInput) |
+| | `components/Chat/MessageList.tsx` | Message list (auto-scroll, streaming cursor) |
+| | `components/Chat/MessageInput.tsx` | Input (Enter to send, Shift+Enter for newline, auto-height) |
+| | `components/Status/AgentStatus.tsx` | Agent status display (Idle/Starting/Running/Stopping) |
+| **CDK** | `web-stack.ts` | S3 bucket + CloudFront (OAC, SPA routing, BucketDeployment) |
 
-검증 결과:
-- TypeScript 빌드: 통과
-- Vite 빌드: 통과 (dist/ 생성)
-- CDK synth: 통과 (WebStack 포함 6개 스택)
-- ESLint: 통과
-- 단위 테스트: 92개 전체 통과 (기존 테스트 미파손)
+Verification results:
+- TypeScript build: passing
+- Vite build: passing (dist/ generated)
+- CDK synth: passing (6 stacks including WebStack)
+- ESLint: passing
+- Unit tests: 92 total, all passing (no existing tests broken)
 
-설계 결정:
-- S3 webBucket을 WebStack 내부에 생성 (StorageStack → WebStack 순환 의존성 방지)
-- `amazon-cognito-identity-js` SRP 인증 (Hosted UI 불필요)
-- `@serverless-openclaw/shared` 직접 import (Vite Bundler 모듈 해석)
-- WebSocket `?token={idToken}` 쿼리 인증 (API GW $connect Authorization 헤더 미지원)
-- Plain CSS + CSS 변수 (다크/라이트 모드 자동 감지)
+Design decisions:
+- S3 webBucket created inside WebStack (avoids StorageStack → WebStack circular dependency)
+- `amazon-cognito-identity-js` SRP auth (no Hosted UI needed)
+- Direct import of `@serverless-openclaw/shared` (Vite bundler module resolution)
+- WebSocket `?token={idToken}` query auth (API GW does not support Authorization header on $connect)
+- Plain CSS + CSS variables (automatic dark/light mode detection)
 
-### 1-9 Telegram 봇 상세 (완료)
+### 1-9 Telegram Bot Details (Complete)
 
-| 구분 | 파일 | 설명 |
-|------|------|------|
-| **서비스** | `services/telegram.ts` | Telegram Bot API sendMessage 래퍼 (fire-and-forget) |
-| **핸들러** | `handlers/telegram-webhook.ts` | cold start 감지 → "깨우는 중..." 즉시 응답 추가 |
-| **CDK** | `api-stack.ts` | `TELEGRAM_BOT_TOKEN` 환경변수 주입 |
-| **스크립트** | `scripts/setup-telegram-webhook.sh` | Webhook URL + secret token 등록 |
+| Category | File | Description |
+|----------|------|-------------|
+| **Service** | `services/telegram.ts` | Telegram Bot API sendMessage wrapper (fire-and-forget) |
+| **Handler** | `handlers/telegram-webhook.ts` | Cold start detection → immediate "Waking up..." response added |
+| **CDK** | `api-stack.ts` | `TELEGRAM_BOT_TOKEN` environment variable injection |
+| **Script** | `scripts/setup-telegram-webhook.sh` | Webhook URL + secret token registration |
 
-검증 결과:
-- 단위 테스트: 99개 전체 통과 (telegram 서비스 4개 + webhook 핸들러 7개 신규/수정)
-- TypeScript 빌드: 통과
-- CDK synth: 통과
-- ESLint: 통과
+Verification results:
+- Unit tests: 99 total, all passing (4 telegram service + 7 webhook handler tests new/modified)
+- TypeScript build: passing
+- CDK synth: passing
+- ESLint: passing
 
-설계 결정:
-- Cold start 감지: `getTaskState` 결과가 null 또는 Starting이면 즉시 Telegram 응답
-- sendTelegramMessage는 fire-and-forget (실패해도 throw하지 않음 — 메시지 라우팅에 영향 없도록)
-- `TELEGRAM_BOT_TOKEN`과 `TELEGRAM_SECRET_TOKEN` 분리 (같은 Secrets Manager 시크릿이지만 용도가 다름)
+Design decisions:
+- Cold start detection: immediate Telegram response when `getTaskState` result is null or Starting
+- sendTelegramMessage is fire-and-forget (does not throw on failure — to avoid affecting message routing)
+- `TELEGRAM_BOT_TOKEN` and `TELEGRAM_SECRET_TOKEN` separated (same Secrets Manager secret but different purposes)
 
-### 1-10 통합 테스트/문서화 상세 (완료)
+### 1-10 Integration Tests/Documentation Details (Complete)
 
-| 구분 | 파일 | 설명 |
-|------|------|------|
-| **배포 가이드** | `docs/deployment.md` | 사전 요구사항, 시크릿 설정, 빌드, 배포, 검증, 트러블슈팅 |
-| **개발 가이드** | `docs/development.md` | 로컬 환경, 빌드, 패키지별 개발, TDD, Git Hooks, 코딩 규칙 |
-| **E2E 테스트** | `packages/cdk/__tests__/stacks.e2e.test.ts` | 6개 CDK 스택 synth + 주요 리소스 검증 (24개 테스트) |
-| **설정** | `vitest.config.ts` | 단위 테스트에서 `*.e2e.test.ts` 제외 |
+| Category | File | Description |
+|----------|------|-------------|
+| **Deployment Guide** | `docs/deployment.md` | Prerequisites, secret setup, build, deployment, verification, troubleshooting |
+| **Development Guide** | `docs/development.md` | Local environment, build, per-package development, TDD, Git Hooks, coding conventions |
+| **E2E Tests** | `packages/cdk/__tests__/stacks.e2e.test.ts` | 6 CDK stack synth + key resource verification (24 tests) |
+| **Config** | `vitest.config.ts` | Exclude `*.e2e.test.ts` from unit tests |
 
-검증 결과:
-- 단위 테스트: 99개 전체 통과 (기존 테스트 미파손)
-- E2E 테스트: 24개 전체 통과 (CDK synth 6개 스택)
-- TypeScript 빌드: 통과
-- ESLint: 통과
+Verification results:
+- Unit tests: 99 total, all passing (no existing tests broken)
+- E2E tests: 24 total, all passing (CDK synth for 6 stacks)
+- TypeScript build: passing
+- ESLint: passing
 
-E2E 테스트 범위:
-- NetworkStack: VPC, NAT Gateway 없음, 퍼블릭 서브넷 2개, VPC Gateway Endpoints, Security Group
-- StorageStack: DynamoDB 5개 (PAY_PER_REQUEST), GSI, S3, ECR
-- AuthStack: Cognito User Pool, SRP 인증, User Pool Domain
-- ComputeStack: ECS 클러스터, Fargate Task Definition (ARM64), CloudWatch Log Group
-- ApiStack: Lambda 6개 (ARM64), WebSocket API, HTTP API, EventBridge watchdog
-- WebStack: S3, CloudFront, OAC, SPA 에러 응답
-
----
-
-## Phase 2: 브라우저 자동화 + 커스텀 Skills (미착수)
-
-| 단계 | 작업 |
-|------|------|
-| 2-1 | Chromium 포함 Docker 이미지 빌드 |
-| 2-2 | 브라우저 자동화 skill 연동 |
-| 2-3 | 커스텀 skill 업로드/관리 API |
-| 2-4 | 설정 관리 UI (LLM 프로바이더 선택, skill 관리) |
-
-## Phase 3: 고급 기능 (미착수)
-
-| 단계 | 작업 |
-|------|------|
-| 3-1 | CloudWatch 알림 + 비용 대시보드 |
-| 3-2 | EventBridge 기반 정기 태스크 스케줄링 |
-| 3-3 | 추가 메신저 (Discord, Slack) 지원 |
+E2E test coverage:
+- NetworkStack: VPC, no NAT Gateway, 2 public subnets, VPC Gateway Endpoints, Security Group
+- StorageStack: 5 DynamoDB tables (PAY_PER_REQUEST), GSI, S3, ECR
+- AuthStack: Cognito User Pool, SRP auth, User Pool Domain
+- ComputeStack: ECS cluster, Fargate Task Definition (ARM64), CloudWatch Log Group
+- ApiStack: 6 Lambda functions (ARM64), WebSocket API, HTTP API, EventBridge watchdog
+- WebStack: S3, CloudFront, OAC, SPA error responses
 
 ---
 
-## 핵심 아키텍처 결정 기록
+## Phase 2: Browser Automation + Custom Skills (Not started)
 
-향후 참고를 위해 Phase 0에서 내린 주요 결정과 그 근거를 기록한다.
+| Step | Task |
+|------|------|
+| 2-1 | Build Docker image with Chromium |
+| 2-2 | Browser automation skill integration |
+| 2-3 | Custom skill upload/management API |
+| 2-4 | Settings management UI (LLM provider selection, skill management) |
 
-| 결정 | 선택 | 근거 |
-|------|------|------|
-| 컴퓨팅 | Fargate Spot (Lambda 컨테이너 불가) | OpenClaw는 15분 초과 장기 실행 + WebSocket 필요 |
-| 네트워크 | 퍼블릭 서브넷 + Public IP | NAT Gateway $32/월 제거, 다층 방어로 보안 보완 |
-| Telegram | Webhook-only | API가 webhook 설정 시 getUpdates 거부 |
-| Cold start 메시지 | PendingMessages DDB (5분 TTL) | Lambda → DDB 저장, Bridge 기동 후 소비 |
-| Gateway 프로토콜 | JSON-RPC 2.0 / MCP over WebSocket | MoltWorker 분석 + Perplexity 조사 결과 확인 |
-| 시크릿 관리 | Secrets Manager → 환경변수 only | 디스크/config 파일에 절대 미기록 |
-| Bridge 보안 | 6계층 방어 | SG, Bearer 토큰, TLS, localhost, non-root, Secrets Manager |
-| 개발 방법론 | TDD (UI 제외) | 테스트 먼저 작성 후 구현, vitest 사용 |
-| Git Hooks | pre-commit: UT + lint, pre-push: E2E | husky로 관리 |
-| E2E 배포 | 로컬(.env) + GitHub Actions(OIDC) | AWS 프로필은 .env, CI는 OIDC 인증 연동 |
+## Phase 3: Advanced Features (Not started)
+
+| Step | Task |
+|------|------|
+| 3-1 | CloudWatch alerts + cost dashboard |
+| 3-2 | EventBridge-based scheduled task scheduling |
+| 3-3 | Additional messenger support (Discord, Slack) |
+
+---
+
+## Key Architecture Decision Records
+
+Recording the major decisions made during Phase 0 and their rationale for future reference.
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Compute | Fargate Spot (Lambda containers not viable) | OpenClaw requires long-running sessions >15 min + WebSocket |
+| Network | Public subnet + Public IP | Eliminates NAT Gateway $32/month, compensated by multi-layer defense |
+| Telegram | Webhook-only | API rejects getUpdates when webhook is set |
+| Cold start messages | PendingMessages DDB (5-min TTL) | Lambda stores to DDB, Bridge consumes after startup |
+| Gateway protocol | JSON-RPC 2.0 / MCP over WebSocket | Confirmed via MoltWorker analysis + Perplexity research |
+| Secret management | Secrets Manager → environment variables only | Never written to disk/config files |
+| Bridge security | 6-layer defense | SG, Bearer token, TLS, localhost, non-root, Secrets Manager |
+| Development methodology | TDD (except UI) | Write tests first then implement, using vitest |
+| Git Hooks | pre-commit: UT + lint, pre-push: E2E | Managed with husky |
+| E2E deployment | Local (.env) + GitHub Actions (OIDC) | AWS profiles via .env, CI uses OIDC auth integration |

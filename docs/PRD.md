@@ -2,82 +2,82 @@
 
 ## Context
 
-OpenClaw는 145K+ 스타를 보유한 오픈소스 AI 에이전트로, 로컬 환경에서 실행되어 다양한 태스크를 자동화한다. 그러나 로컬 실행은 항상 켜진 머신이 필요하고, 외부 접근이 어렵다는 한계가 있다.
+OpenClaw is an open-source AI agent with over 145K stars that runs in local environments to automate various tasks. However, local execution has limitations: it requires an always-on machine and is difficult to access externally.
 
-Cloudflare의 MoltWorker가 Cloudflare Workers + Sandbox에서 OpenClaw를 서버리스로 구동하는 방식을 제시했지만, AWS 생태계를 선호하는 사용자에게는 대안이 없다.
+Cloudflare's MoltWorker demonstrated an approach to running OpenClaw serverlessly on Cloudflare Workers + Sandbox, but there is no alternative for users who prefer the AWS ecosystem.
 
-**serverless-openclaw** 는 AWS 서버리스 인프라에서 OpenClaw를 on-demand로 구동하고, 웹 UI와 Telegram을 인터페이스로 제공하는 오픈소스 프로젝트다. 누구나 자신의 AWS 계정에 간단히 배포할 수 있는 것을 목표로 한다.
-
----
-
-## 1. 프로젝트 개요
-
-| 항목 | 내용 |
-|------|------|
-| **프로젝트명** | serverless-openclaw |
-| **목표** | AWS 서버리스에서 OpenClaw를 on-demand로 구동 + 웹/Telegram 인터페이스 제공 |
-| **타겟 사용자** | 개인 사용자 (자신만의 AI 에이전트를 서버리스로 호스팅하려는 개발자) |
-| **참고 프로젝트** | [cloudflare/moltworker](https://github.com/cloudflare/moltworker) (아키텍처 참고만) |
-| **라이선스** | 오픈소스 (GitHub 공개) |
-| **개발 언어** | TypeScript 통일 (CDK + 백엔드 + 프론트엔드) |
+**serverless-openclaw** is an open-source project that runs OpenClaw on-demand on AWS serverless infrastructure, providing web UI and Telegram as interfaces. The goal is to enable anyone to easily deploy it to their own AWS account.
 
 ---
 
-## 2. 핵심 기능
+## 1. Project Overview
+
+| Item | Description |
+|------|-------------|
+| **Project Name** | serverless-openclaw |
+| **Goal** | Run OpenClaw on-demand on AWS serverless + provide web/Telegram interfaces |
+| **Target Users** | Individual users (developers who want to host their own AI agent serverlessly) |
+| **Reference Project** | [cloudflare/moltworker](https://github.com/cloudflare/moltworker) (architecture reference only) |
+| **License** | Open source (published on GitHub) |
+| **Development Language** | TypeScript unified (CDK + backend + frontend) |
+
+---
+
+## 2. Core Features
 
 ### Phase 1 (MVP)
-- **OpenClaw 서버리스 런타임**: AWS ECS Fargate에서 OpenClaw Docker 컨테이너 on-demand 구동
-- **웹 채팅 UI**: React SPA 기반 채팅 인터페이스 (S3 + CloudFront 호스팅)
-- **Telegram 봇 통합**: Telegram을 통한 OpenClaw 대화 및 명령
-- **AI 대화/채팅**: 사용자가 선택한 LLM 프로바이더(Claude, GPT, DeepSeek 등) 지원
-- **태스크 자동화**: OpenClaw의 기본 skills를 통한 태스크 수행
-- **인증**: AWS Cognito 기반 사용자 인증
-- **데이터 영속성**: S3(파일/백업) + DynamoDB(대화 이력/설정/메타데이터)
+- **OpenClaw Serverless Runtime**: On-demand OpenClaw Docker container execution on AWS ECS Fargate
+- **Web Chat UI**: Chat interface based on React SPA (hosted on S3 + CloudFront)
+- **Telegram Bot Integration**: OpenClaw conversations and commands via Telegram
+- **AI Conversation/Chat**: Support for user-selected LLM providers (Claude, GPT, DeepSeek, etc.)
+- **Task Automation**: Task execution through OpenClaw's built-in skills
+- **Authentication**: User authentication based on AWS Cognito
+- **Data Persistence**: S3 (files/backups) + DynamoDB (conversation history/settings/metadata)
 
 ### Phase 2
-- **브라우저 자동화**: headless Chromium 포함 컨테이너로 웹 브라우징/자동화
-- **커스텀 Skills 개발**: 사용자 정의 skill 추가 지원
-- **설정 UI**: LLM 프로바이더 선택, skill 관리 등 관리 인터페이스
+- **Browser Automation**: Web browsing/automation with a container that includes headless Chromium
+- **Custom Skills Development**: Support for adding user-defined skills
+- **Settings UI**: Management interface for LLM provider selection, skill management, etc.
 
 ### Phase 3
-- **고급 모니터링**: CloudWatch 알림, 비용 대시보드
-- **스케줄링**: 정기 태스크 실행 (EventBridge 연동)
-- **멀티 채널 확장**: Discord, Slack 등 추가 메신저 지원
+- **Advanced Monitoring**: CloudWatch alerts, cost dashboard
+- **Scheduling**: Periodic task execution (EventBridge integration)
+- **Multi-Channel Expansion**: Additional messenger support for Discord, Slack, etc.
 
 ---
 
-## 3. 아키텍처
+## 3. Architecture
 
-### 3.1 전체 구성도
+### 3.1 Overall Diagram
 
 ```mermaid
 graph TB
-    User[사용자]
+    User[User]
 
-    subgraph "인터페이스"
+    subgraph "Interfaces"
         WebUI[React SPA\nS3 + CloudFront]
         TGBot[Telegram Bot]
     end
 
-    subgraph "API 계층"
+    subgraph "API Layer"
         APIGW[API Gateway\nWebSocket + REST]
-        Lambda_GW[Gateway Lambda\n라우팅/인증/컨테이너 관리]
+        Lambda_GW[Gateway Lambda\nRouting/Auth/Container Mgmt]
     end
 
-    subgraph "인증"
+    subgraph "Authentication"
         Cognito[AWS Cognito\nUser Pool]
     end
 
-    subgraph "컴퓨팅"
-        Fargate[ECS Fargate Task\nOpenClaw 컨테이너]
+    subgraph "Compute"
+        Fargate[ECS Fargate Task\nOpenClaw Container]
     end
 
-    subgraph "스토리지"
-        DynamoDB[(DynamoDB\n대화 이력/설정)]
-        S3[(S3\n파일/백업)]
+    subgraph "Storage"
+        DynamoDB[(DynamoDB\nConversation History/Settings)]
+        S3[(S3\nFiles/Backups)]
     end
 
-    subgraph "모니터링"
+    subgraph "Monitoring"
         CW[CloudWatch\nLogs + Metrics]
     end
 
@@ -94,71 +94,71 @@ graph TB
     Lambda_GW --> CW
 ```
 
-### 3.2 컴포넌트 상세
+### 3.2 Component Details
 
 #### API Gateway + Gateway Lambda
-- **역할**: 모든 요청의 진입점. 인증 검증, 컨테이너 생명주기 관리, 메시지 라우팅
-- **WebSocket**: 웹 UI와의 실시간 양방향 통신 (채팅 스트리밍)
-- **REST**: Telegram webhook 수신, 관리 API
-- **컨테이너 관리**: Fargate 태스크 시작/중지/상태 확인
+- **Role**: Entry point for all requests. Authentication verification, container lifecycle management, message routing
+- **WebSocket**: Real-time bidirectional communication with the web UI (chat streaming)
+- **REST**: Telegram webhook reception, management API
+- **Container Management**: Fargate task start/stop/status check
 
-#### ECS Fargate (OpenClaw 런타임)
-- **On-demand 실행**: 요청 시 태스크 시작, 비활성 시 자동 종료
-- **Docker 이미지**: OpenClaw + Node.js + headless Chromium (Phase 2)
-- **생명주기**:
-  1. 사용자 요청 수신
-  2. Gateway Lambda가 실행 중인 태스크 확인
-  3. 없으면 새 Fargate 태스크 시작 (cold start ~30초-1분)
-  4. 태스크에 메시지 전달
-  5. 비활성 타임아웃 후 태스크 종료
+#### ECS Fargate (OpenClaw Runtime)
+- **On-demand Execution**: Task starts on request, automatically terminates when inactive
+- **Docker Image**: OpenClaw + Node.js + headless Chromium (Phase 2)
+- **Lifecycle**:
+  1. User request received
+  2. Gateway Lambda checks for a running task
+  3. If none exists, starts a new Fargate task (cold start ~30s-1min)
+  4. Delivers message to the task
+  5. Task terminates after inactivity timeout
 
-#### React SPA (웹 UI)
-- **기술 스택**: React + Vite + TypeScript
-- **호스팅**: S3 정적 호스팅 + CloudFront CDN
-- **기능**: 채팅 인터페이스, 로딩 상태 표시, 대화 이력 조회
-- **통신**: WebSocket으로 실시간 메시지 송수신
+#### React SPA (Web UI)
+- **Tech Stack**: React + Vite + TypeScript
+- **Hosting**: S3 static hosting + CloudFront CDN
+- **Features**: Chat interface, loading state display, conversation history browsing
+- **Communication**: Real-time message send/receive via WebSocket
 
-#### Telegram 봇
-- **통신 방식**: Webhook (API Gateway에 Telegram webhook 등록)
-- **기능**: 텍스트 대화, 명령어 처리, 상태 알림
-- **인증**: Telegram 사용자 ID 기반 + Cognito 연동
+#### Telegram Bot
+- **Communication Method**: Webhook (Telegram webhook registered with API Gateway)
+- **Features**: Text conversations, command processing, status notifications
+- **Authentication**: Telegram user ID based + Cognito integration
 
-#### 데이터 모델 (DynamoDB)
+#### Data Model (DynamoDB)
 
-| 테이블 | PK | SK | 용도 |
-|--------|-----|-----|------|
-| Conversations | userId | conversationId#timestamp | 대화 이력 |
-| Settings | userId | settingKey | 사용자 설정 (LLM 프로바이더, skill 설정 등) |
-| TaskState | userId | - | Fargate 태스크 상태 추적 |
-| Connections | connectionId | - | WebSocket 연결 관리 |
-| PendingMessages | userId | timestamp#uuid | Cold start 중 메시지 큐잉 |
+| Table | PK | SK | Purpose |
+|-------|-----|-----|---------|
+| Conversations | userId | conversationId#timestamp | Conversation history |
+| Settings | userId | settingKey | User settings (LLM provider, skill configuration, etc.) |
+| TaskState | userId | - | Fargate task state tracking |
+| Connections | connectionId | - | WebSocket connection management |
+| PendingMessages | userId | timestamp#uuid | Message queuing during cold start |
 
-#### S3 버킷
-- **openclaw-data**: OpenClaw 설정 파일, skill 파일, 백업 데이터
-- **openclaw-web**: React SPA 정적 파일 호스팅
+#### S3 Buckets
+- **openclaw-data**: OpenClaw configuration files, skill files, backup data
+- **openclaw-web**: React SPA static file hosting
 
 ---
 
-## 4. On-demand 컨테이너 생명주기
+## 4. On-demand Container Lifecycle
 
 ```mermaid
 stateDiagram-v2
     [*] --> Idle
-    Idle --> Starting: 사용자 요청 수신
-    Starting --> Running: Fargate 태스크 시작 완료
-    Running --> Running: 메시지 처리
-    Running --> Stopping: 비활성 타임아웃
-    Stopping --> Idle: 태스크 종료
-    Starting --> Idle: 시작 실패
+    Idle --> Starting: User request received
+    Starting --> Running: Fargate task startup complete
+    Running --> Running: Processing messages
+    Running --> Stopping: Inactivity timeout
+    Stopping --> Idle: Task terminated
+    Starting --> Idle: Startup failed
 ```
 
-- **Cold Start 처리**: Gateway Lambda가 "에이전트를 깨우는 중..." 상태 메시지를 WebSocket/Telegram으로 전송
-- **비활성 타임아웃**: 마지막 메시지 이후 설정 가능한 시간(기본 15분) 경과 시 태스크 종료
-- **상태 추적**: DynamoDB TaskState 테이블에서 현재 태스크 상태 관리
+- **Cold Start Handling**: Gateway Lambda sends a "Waking up the agent..." status message via WebSocket/Telegram
+- **Inactivity Timeout**: Task terminates after a configurable period (default 15 minutes) since the last message
+- **State Tracking**: Current task state managed in the DynamoDB TaskState table
 
 ---
 
-## 5. 인증 흐름
+## 5. Authentication Flow
 
 ```mermaid
 sequenceDiagram
@@ -168,85 +168,85 @@ sequenceDiagram
     participant APIGW
     participant Lambda
 
-    User->>WebUI: 로그인 요청
-    WebUI->>Cognito: 인증 (이메일/비밀번호 또는 소셜)
-    Cognito-->>WebUI: JWT 토큰 발급
-    WebUI->>APIGW: 요청 + JWT 토큰
-    APIGW->>Cognito: 토큰 검증
-    APIGW->>Lambda: 인증된 요청 전달
+    User->>WebUI: Login request
+    WebUI->>Cognito: Authenticate (email/password or social)
+    Cognito-->>WebUI: Issue JWT token
+    WebUI->>APIGW: Request + JWT token
+    APIGW->>Cognito: Verify token
+    APIGW->>Lambda: Forward authenticated request
 ```
 
-- **웹 UI**: Cognito Hosted UI 또는 커스텀 로그인 폼
-- **Telegram**: 초기 페어링 시 웹 UI에서 Telegram 사용자 ID 등록. 이후 Telegram user ID로 자동 인증
+- **Web UI**: Cognito Hosted UI or custom login form
+- **Telegram**: Register Telegram user ID via web UI during initial pairing. Auto-authenticate via Telegram user ID afterward
 
 ---
 
-## 6. 기술 스택
+## 6. Tech Stack
 
-| 계층 | 기술 | 이유 |
-|------|------|------|
-| **IaC** | AWS CDK (TypeScript) | TypeScript 통일, L2 construct로 간결한 정의 |
-| **API** | API Gateway (WebSocket + REST) | 서버리스, WebSocket 네이티브 지원 |
-| **게이트웨이** | Lambda (Node.js/TypeScript) | 이벤트 기반, 빠른 응답, 비용 효율 |
-| **런타임** | ECS Fargate | 서버리스 컨테이너, 장기 실행 가능, on-demand 스케일링 |
-| **프론트엔드** | React + Vite + TypeScript | SPA 채팅 UI, S3/CloudFront 호스팅 |
-| **인증** | AWS Cognito | 관리형 인증, JWT, 소셜 로그인 지원 |
-| **DB** | DynamoDB | 서버리스 NoSQL, 사용량 기반 과금, 관리 불필요 |
-| **파일 저장소** | S3 | OpenClaw 설정/백업, 웹 호스팅 |
-| **모니터링** | CloudWatch | AWS 네이티브, 추가 비용 최소 |
-| **메신저** | Telegram Bot API | Webhook 방식, 무료, 개인 사용에 적합 |
-
----
-
-## 7. 예상 비용 (월간, 개인 사용 기준)
-
-Fargate Spot + API Gateway 조합으로 극한의 비용 최적화를 적용한다. 상세 분석은 [비용 최적화 분석](cost-optimization.md) 참조.
-
-### 프리 티어 내 (가입 후 12개월)
-
-| 서비스 | 사용 패턴 | 예상 비용 |
-|--------|----------|----------|
-| ECS Fargate Spot | 하루 2시간 (0.25 vCPU, 0.5GB) | ~$0.23 |
-| API Gateway | WebSocket + REST (월 10K 요청) | $0 (프리 티어) |
-| Lambda | 컨테이너 관리 | $0 (프리 티어) |
-| DynamoDB | 월 100K 읽기/쓰기 | $0 (프리 티어) |
-| S3 | 1GB 이하 | $0 (프리 티어) |
-| CloudFront | 1GB 전송 | $0 (프리 티어) |
-| Cognito | 50,000 MAU 이하 | $0 (무기한 무료) |
-| CloudWatch | 기본 로깅 | $0 (프리 티어) |
-| **합계** | | **~$0.23/월** |
-
-### 프리 티어 만료 후
-
-| 서비스 | 사용 패턴 | 예상 비용 |
-|--------|----------|----------|
-| ECS Fargate Spot | 하루 2시간 (0.25 vCPU, 0.5GB) | ~$0.23 |
-| API Gateway | WebSocket + REST (월 10K 요청) | ~$0.05 |
-| Lambda | 컨테이너 관리 | ~$0 |
-| DynamoDB | 월 100K 읽기/쓰기 | ~$0.16 |
-| S3 | 1GB 이하 | ~$0.03 |
-| CloudFront | 1GB 전송 | ~$0.09 |
-| Cognito | 50,000 MAU 이하 | $0 (무기한 무료) |
-| CloudWatch | 기본 로깅 | ~$0.50 |
-| **합계** | | **~$1.07/월** |
-
-> **핵심 최적화 포인트**: Fargate Spot은 On-Demand 대비 ~70% 할인. API Gateway는 ALB 대비 월 $18-25 절감. 개인 저트래픽 사용에서 ELB 제거가 가장 큰 비용 절감 요소.
+| Layer | Technology | Rationale |
+|-------|------------|-----------|
+| **IaC** | AWS CDK (TypeScript) | Unified TypeScript, concise definitions with L2 constructs |
+| **API** | API Gateway (WebSocket + REST) | Serverless, native WebSocket support |
+| **Gateway** | Lambda (Node.js/TypeScript) | Event-driven, fast response, cost-efficient |
+| **Runtime** | ECS Fargate | Serverless containers, long-running capable, on-demand scaling |
+| **Frontend** | React + Vite + TypeScript | SPA chat UI, S3/CloudFront hosting |
+| **Auth** | AWS Cognito | Managed authentication, JWT, social login support |
+| **DB** | DynamoDB | Serverless NoSQL, usage-based billing, zero management |
+| **File Storage** | S3 | OpenClaw configuration/backups, web hosting |
+| **Monitoring** | CloudWatch | AWS native, minimal additional cost |
+| **Messenger** | Telegram Bot API | Webhook-based, free, suitable for personal use |
 
 ---
 
-## 8. 프로젝트 구조
+## 7. Estimated Cost (Monthly, Personal Use)
+
+Aggressive cost optimization is applied using the Fargate Spot + API Gateway combination. See [Cost Optimization Analysis](cost-optimization.md) for detailed analysis.
+
+### Within Free Tier (First 12 Months After Signup)
+
+| Service | Usage Pattern | Estimated Cost |
+|---------|--------------|----------------|
+| ECS Fargate Spot | 2 hours/day (0.25 vCPU, 0.5GB) | ~$0.23 |
+| API Gateway | WebSocket + REST (10K requests/month) | $0 (Free Tier) |
+| Lambda | Container management | $0 (Free Tier) |
+| DynamoDB | 100K reads/writes per month | $0 (Free Tier) |
+| S3 | Under 1GB | $0 (Free Tier) |
+| CloudFront | 1GB transfer | $0 (Free Tier) |
+| Cognito | Under 50,000 MAU | $0 (Always free) |
+| CloudWatch | Basic logging | $0 (Free Tier) |
+| **Total** | | **~$0.23/month** |
+
+### After Free Tier Expiration
+
+| Service | Usage Pattern | Estimated Cost |
+|---------|--------------|----------------|
+| ECS Fargate Spot | 2 hours/day (0.25 vCPU, 0.5GB) | ~$0.23 |
+| API Gateway | WebSocket + REST (10K requests/month) | ~$0.05 |
+| Lambda | Container management | ~$0 |
+| DynamoDB | 100K reads/writes per month | ~$0.16 |
+| S3 | Under 1GB | ~$0.03 |
+| CloudFront | 1GB transfer | ~$0.09 |
+| Cognito | Under 50,000 MAU | $0 (Always free) |
+| CloudWatch | Basic logging | ~$0.50 |
+| **Total** | | **~$1.07/month** |
+
+> **Key Optimization Points**: Fargate Spot offers ~70% discount compared to On-Demand. API Gateway saves ~$18-25/month compared to ALB. For personal low-traffic use, eliminating the ELB is the single largest cost reduction factor.
+
+---
+
+## 8. Project Structure
 
 ```
 serverless-openclaw/
 ├── README.md
-├── package.json                    # 모노레포 루트
+├── package.json                    # Monorepo root
 ├── tsconfig.json
 ├── .gitignore
 │
 ├── packages/
-│   ├── cdk/                        # AWS CDK 인프라 정의
+│   ├── cdk/                        # AWS CDK infrastructure definitions
 │   │   ├── bin/
-│   │   │   └── app.ts              # CDK 앱 진입점
+│   │   │   └── app.ts              # CDK app entry point
 │   │   ├── lib/
 │   │   │   ├── stacks/
 │   │   │   │   ├── network-stack.ts
@@ -255,31 +255,31 @@ serverless-openclaw/
 │   │   │   │   ├── compute-stack.ts
 │   │   │   │   ├── storage-stack.ts
 │   │   │   │   └── web-stack.ts
-│   │   │   └── constructs/         # 재사용 가능한 CDK construct
+│   │   │   └── constructs/         # Reusable CDK constructs
 │   │   └── package.json
 │   │
-│   ├── gateway/                    # Lambda 핸들러 (Gateway)
+│   ├── gateway/                    # Lambda handlers (Gateway)
 │   │   ├── src/
 │   │   │   ├── handlers/
-│   │   │   │   ├── websocket.ts    # WebSocket 연결/메시지 처리
-│   │   │   │   ├── telegram.ts     # Telegram webhook 처리
-│   │   │   │   └── api.ts          # REST API 핸들러
+│   │   │   │   ├── websocket.ts    # WebSocket connection/message handling
+│   │   │   │   ├── telegram.ts     # Telegram webhook handling
+│   │   │   │   └── api.ts          # REST API handler
 │   │   │   ├── services/
-│   │   │   │   ├── container.ts    # Fargate 태스크 관리
-│   │   │   │   ├── message.ts      # 메시지 라우팅
-│   │   │   │   └── auth.ts         # 인증 헬퍼
+│   │   │   │   ├── container.ts    # Fargate task management
+│   │   │   │   ├── message.ts      # Message routing
+│   │   │   │   └── auth.ts         # Authentication helpers
 │   │   │   └── index.ts
 │   │   └── package.json
 │   │
-│   ├── container/                  # OpenClaw Docker 컨테이너
+│   ├── container/                  # OpenClaw Docker container
 │   │   ├── Dockerfile
 │   │   ├── src/
-│   │   │   ├── bridge.ts           # Gateway ↔ OpenClaw 브릿지
-│   │   │   ├── lifecycle.ts        # 컨테이너 생명주기 관리
-│   │   │   └── config.ts           # OpenClaw 설정 로더
+│   │   │   ├── bridge.ts           # Gateway <-> OpenClaw bridge
+│   │   │   ├── lifecycle.ts        # Container lifecycle management
+│   │   │   └── config.ts           # OpenClaw configuration loader
 │   │   └── package.json
 │   │
-│   ├── web/                        # React SPA (채팅 UI)
+│   ├── web/                        # React SPA (Chat UI)
 │   │   ├── src/
 │   │   │   ├── components/
 │   │   │   │   ├── Chat/
@@ -293,17 +293,17 @@ serverless-openclaw/
 │   │   ├── vite.config.ts
 │   │   └── package.json
 │   │
-│   └── shared/                     # 공유 타입/유틸리티
+│   └── shared/                     # Shared types/utilities
 │       ├── src/
 │       │   ├── types.ts
 │       │   └── constants.ts
 │       └── package.json
 │
-├── docker/                         # Docker 관련 파일
+├── docker/                         # Docker-related files
 │   └── openclaw/
-│       └── Dockerfile              # OpenClaw + Chromium 이미지
+│       └── Dockerfile              # OpenClaw + Chromium image
 │
-└── docs/                           # 문서
+└── docs/                           # Documentation
     ├── PRD.md
     ├── architecture.md
     ├── deployment.md
@@ -312,73 +312,73 @@ serverless-openclaw/
 
 ---
 
-## 9. 구현 로드맵
+## 9. Implementation Roadmap
 
-### Phase 1: MVP (코어 + Telegram)
+### Phase 1: MVP (Core + Telegram)
 
-| 단계 | 작업 | 설명 |
-|------|------|------|
-| 1-1 | 프로젝트 초기화 | 모노레포 설정, CDK 프로젝트 부트스트랩, 공통 설정 |
-| 1-2 | 인프라 기반 | VPC, ECS 클러스터, DynamoDB 테이블, S3 버킷 CDK 정의 |
-| 1-3 | OpenClaw 컨테이너 | Docker 이미지 빌드, ECR 푸시, Fargate 태스크 정의 |
-| 1-4 | Gateway Lambda | 컨테이너 생명주기 관리, 메시지 라우팅, 인증 |
-| 1-5 | API Gateway | WebSocket + REST 엔드포인트 설정 |
-| 1-6 | Cognito 인증 | User Pool 설정, JWT 검증, Telegram 사용자 연동 |
-| 1-7 | 웹 채팅 UI | React SPA 개발, WebSocket 통신, S3/CloudFront 배포 |
-| 1-8 | Telegram 봇 | Webhook 설정, 메시지 핸들링, 사용자 페어링 |
-| 1-9 | 데이터 영속성 | 대화 이력 저장/조회, 사용자 설정 관리 |
-| 1-10 | 배포/문서화 | 원클릭 배포 가이드, README, 설정 가이드 |
+| Step | Task | Description |
+|------|------|-------------|
+| 1-1 | Project initialization | Monorepo setup, CDK project bootstrap, common configuration |
+| 1-2 | Infrastructure foundation | VPC, ECS cluster, DynamoDB tables, S3 bucket CDK definitions |
+| 1-3 | OpenClaw container | Docker image build, ECR push, Fargate task definition |
+| 1-4 | Gateway Lambda | Container lifecycle management, message routing, authentication |
+| 1-5 | API Gateway | WebSocket + REST endpoint configuration |
+| 1-6 | Cognito authentication | User Pool setup, JWT verification, Telegram user integration |
+| 1-7 | Web chat UI | React SPA development, WebSocket communication, S3/CloudFront deployment |
+| 1-8 | Telegram bot | Webhook setup, message handling, user pairing |
+| 1-9 | Data persistence | Conversation history storage/retrieval, user settings management |
+| 1-10 | Deployment/documentation | One-click deployment guide, README, configuration guide |
 
-### Phase 2: 브라우저 자동화 + 커스텀 Skills
+### Phase 2: Browser Automation + Custom Skills
 
-| 단계 | 작업 |
+| Step | Task |
 |------|------|
-| 2-1 | Chromium 포함 Docker 이미지 빌드 |
-| 2-2 | 브라우저 자동화 skill 연동 |
-| 2-3 | 커스텀 skill 업로드/관리 API |
-| 2-4 | 설정 관리 UI (LLM 프로바이더 선택, skill 관리) |
+| 2-1 | Build Docker image with Chromium included |
+| 2-2 | Browser automation skill integration |
+| 2-3 | Custom skill upload/management API |
+| 2-4 | Settings management UI (LLM provider selection, skill management) |
 
-### Phase 3: 고급 기능
+### Phase 3: Advanced Features
 
-| 단계 | 작업 |
+| Step | Task |
 |------|------|
-| 3-1 | CloudWatch 알림 + 비용 대시보드 |
-| 3-2 | EventBridge 기반 정기 태스크 스케줄링 |
-| 3-3 | 추가 메신저 (Discord, Slack) 지원 |
+| 3-1 | CloudWatch alerts + cost dashboard |
+| 3-2 | EventBridge-based periodic task scheduling |
+| 3-3 | Additional messenger support (Discord, Slack) |
 
 ---
 
-## 10. 비기능 요구사항
+## 10. Non-Functional Requirements
 
-| 항목 | 요구사항 |
-|------|---------|
-| **가용성** | 99.9% (AWS 서버리스 SLA 기반) |
-| **Cold Start** | 30초~1분 이내. UI에 로딩 상태 표시 |
-| **보안** | Cognito JWT 인증, HTTPS 필수, 시크릿은 Secrets Manager/SSM Parameter Store |
-| **비용** | 월 $10 이하 (개인 사용, on-demand 기준) |
-| **배포** | `cdk deploy` 원커맨드 배포. 초기 설정 가이드 제공 |
-| **오픈소스** | MIT 또는 Apache 2.0 라이선스. 기여 가이드라인 포함 |
-
----
-
-## 11. 리스크 및 대응
-
-| 리스크 | 영향 | 대응 방안 |
-|--------|------|----------|
-| Fargate cold start가 사용자 경험 저하 | 중간 | 로딩 상태 표시 + 향후 warm pool 옵션 제공 |
-| OpenClaw 버전 업데이트 호환성 | 높음 | Docker 이미지 태그로 버전 고정, 업데이트 가이드 제공 |
-| Fargate 태스크가 종료되지 않아 비용 증가 | 중간 | Lambda 기반 watchdog으로 좀비 태스크 강제 종료 |
-| Telegram webhook 보안 취약점 | 높음 | Telegram secret token 검증, 등록된 사용자만 응답 |
-| OpenClaw 내부 보안 (skill 실행 권한) | 높음 | 컨테이너 IAM 역할 최소 권한 원칙, 네트워크 정책 제한 |
+| Item | Requirement |
+|------|-------------|
+| **Availability** | 99.9% (based on AWS serverless SLA) |
+| **Cold Start** | Within 30 seconds to 1 minute. Loading state displayed in UI |
+| **Security** | Cognito JWT authentication, HTTPS required, secrets via Secrets Manager/SSM Parameter Store |
+| **Cost** | Under $10/month (personal use, on-demand basis) |
+| **Deployment** | Single-command deployment via `cdk deploy`. Initial setup guide provided |
+| **Open Source** | MIT or Apache 2.0 license. Contribution guidelines included |
 
 ---
 
-## 12. 성공 기준
+## 11. Risks and Mitigations
 
-- [ ] `cdk deploy` 한 번으로 전체 인프라 배포 가능
-- [ ] 웹 UI에서 OpenClaw와 실시간 채팅 가능
-- [ ] Telegram에서 OpenClaw와 대화 가능
-- [ ] 컨테이너가 on-demand로 시작/종료되어 비활성 시 비용 미발생
-- [ ] 대화 이력이 DynamoDB에 영속적으로 저장
-- [ ] LLM 프로바이더를 사용자가 설정에서 선택 가능
-- [ ] 배포 가이드 문서로 다른 사용자도 자신의 AWS 계정에 배포 가능
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+| Fargate cold start degrades user experience | Medium | Display loading state + provide warm pool option in the future |
+| OpenClaw version update compatibility | High | Pin version via Docker image tags, provide update guide |
+| Fargate tasks not terminating leading to cost increase | Medium | Lambda-based watchdog to force-terminate zombie tasks |
+| Telegram webhook security vulnerabilities | High | Telegram secret token verification, respond only to registered users |
+| OpenClaw internal security (skill execution permissions) | High | Least privilege principle for container IAM roles, network policy restrictions |
+
+---
+
+## 12. Success Criteria
+
+- [ ] Full infrastructure deployable with a single `cdk deploy`
+- [ ] Real-time chat with OpenClaw possible via web UI
+- [ ] Conversation with OpenClaw possible via Telegram
+- [ ] Containers start/stop on-demand with no cost incurred during inactivity
+- [ ] Conversation history persistently stored in DynamoDB
+- [ ] Users can select LLM provider in settings
+- [ ] Deployment guide documentation enables other users to deploy to their own AWS accounts

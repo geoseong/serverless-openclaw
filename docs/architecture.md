@@ -1,60 +1,60 @@
-# 아키텍처 설계서
+# Architecture Design Document
 
-PRD를 기반으로 한 상세 기술 아키텍처. 각 컴포넌트의 설계, 데이터 흐름, API 계약, 보안 모델을 정의한다.
+Detailed technical architecture based on the PRD. Defines the design, data flow, API contracts, and security model for each component.
 
 ---
 
-## 1. 시스템 전체 구성
+## 1. Overall System Architecture
 
 ```mermaid
 graph TB
-    User[사용자]
+    User[User]
 
-    subgraph "프론트엔드"
+    subgraph "Frontend"
         CF[CloudFront CDN]
-        S3Web[(S3 - 정적 호스팅)]
+        S3Web[(S3 - Static Hosting)]
         WebUI[React SPA]
     end
 
-    subgraph "API 계층"
+    subgraph "API Layer"
         WSAPI[API Gateway\nWebSocket API]
         RESTAPI[API Gateway\nREST API]
     end
 
-    subgraph "게이트웨이 Lambda"
+    subgraph "Gateway Lambda"
         WS_Connect[ws-connect]
         WS_Message[ws-message]
         WS_Disconnect[ws-disconnect]
         TG_Webhook[telegram-webhook]
         API_Handler[api-handler]
-        Watchdog[watchdog\nEventBridge 트리거]
+        Watchdog[watchdog\nEventBridge Trigger]
     end
 
-    subgraph "인증"
+    subgraph "Authentication"
         Cognito[Cognito User Pool]
     end
 
-    subgraph "컴퓨팅"
+    subgraph "Compute"
         ECS[ECS Cluster]
-        Fargate[Fargate Spot Task\nOpenClaw 컨테이너]
+        Fargate[Fargate Spot Task\nOpenClaw Container]
         ECR[ECR Repository]
     end
 
-    subgraph "스토리지"
+    subgraph "Storage"
         DDB_Conv[(DynamoDB\nConversations)]
         DDB_Settings[(DynamoDB\nSettings)]
         DDB_Task[(DynamoDB\nTaskState)]
         DDB_Conn[(DynamoDB\nConnections)]
-        S3Data[(S3 - 데이터)]
+        S3Data[(S3 - Data)]
     end
 
-    subgraph "네트워크"
+    subgraph "Network"
         VPC[VPC]
-        PubSub[퍼블릭 서브넷]
+        PubSub[Public Subnet]
         VPCE[VPC Gateway Endpoints\nDynamoDB, S3]
     end
 
-    subgraph "시크릿"
+    subgraph "Secrets"
         SSM[SSM Parameter Store]
         SM[Secrets Manager]
     end
@@ -92,117 +92,117 @@ graph TB
 
 ---
 
-## 2. 네트워크 설계
+## 2. Network Design
 
-### 설계 원칙: NAT Gateway 제거
+### Design Principle: Eliminating NAT Gateway
 
-NAT Gateway는 단일 AZ 최소 구성에서도 월 ~$33(고정 $4.5 + 데이터 처리 비용)이 발생한다. 이는 전체 비용 목표($1/월)를 30배 이상 초과하므로, Fargate에 Public IP를 할당하여 NAT Gateway를 완전히 제거한다.
+A NAT Gateway costs at least ~$33/month ($4.5 fixed + data processing costs) even in a single-AZ minimal configuration. This exceeds the overall cost target ($1/month) by more than 30x, so we assign Public IPs to Fargate tasks and completely eliminate the NAT Gateway.
 
-### VPC 구성
+### VPC Configuration
 
 ```
 VPC: 10.0.0.0/16
 
-퍼블릭 서브넷 (Fargate 태스크, Public IP 할당):
+Public Subnets (Fargate tasks, Public IP assigned):
   - 10.0.1.0/24 (AZ-a)
   - 10.0.2.0/24 (AZ-b)
 
-프라이빗 서브넷: 없음 (NAT Gateway 불필요)
+Private Subnets: None (NAT Gateway not needed)
 ```
 
-### 네트워크 흐름
+### Network Flow
 
 ```mermaid
 graph LR
-    Internet[인터넷]
+    Internet[Internet]
     APIGW[API Gateway]
-    Lambda[Lambda\nVPC 외부]
+    Lambda[Lambda\nOutside VPC]
     Fargate[Fargate Task\nPublic IP]
     VPCE[VPC Gateway Endpoints\nDynamoDB, S3]
 
     Internet --> APIGW
     APIGW --> Lambda
     Lambda -->|Public IP| Fargate
-    Fargate -->|직접 아웃바운드| Internet
+    Fargate -->|Direct Outbound| Internet
     Fargate --> VPCE
 ```
 
-- **Fargate 태스크**: 퍼블릭 서브넷에 배치, Public IP 할당. LLM API 등 외부 서비스에 직접 접근 (NAT 불필요)
-- **Lambda**: VPC 외부에서 실행. ECS API로 태스크 관리, Fargate Public IP로 Bridge 서버에 HTTP 통신
-- **VPC Gateway Endpoints**: DynamoDB, S3 트래픽을 AWS 내부 네트워크로 유지 (무료, 성능 최적화)
+- **Fargate Tasks**: Placed in public subnets with Public IP assigned. Directly access external services such as LLM APIs (no NAT required)
+- **Lambda**: Runs outside the VPC. Manages tasks via ECS API, communicates with the Bridge server via HTTP using the Fargate Public IP
+- **VPC Gateway Endpoints**: Keeps DynamoDB and S3 traffic within the AWS internal network (free, optimized performance)
 
-### 보안 그룹
+### Security Groups
 
-| 보안 그룹 | 인바운드 | 아웃바운드 |
+| Security Group | Inbound | Outbound |
 |----------|---------|----------|
-| **sg-fargate** | 8080 (Bridge) - 0.0.0.0/0 (인증 토큰으로 보호) | 전체 허용 (443 HTTPS - LLM API, AWS 서비스) |
+| **sg-fargate** | 8080 (Bridge) - 0.0.0.0/0 (protected by auth token) | All allowed (443 HTTPS - LLM API, AWS services) |
 
-> **Bridge 보안**: Lambda는 VPC 외부에서 실행되어 고정 IP가 없으므로, Security Group으로 소스 IP를 제한할 수 없다. Bridge 서버의 공유 시크릿 토큰 인증으로 무단 접근을 차단한다.
+> **Bridge Security**: Lambda runs outside the VPC and has no fixed IP, so source IP restriction via Security Group is not possible. The Bridge server's shared secret token authentication blocks unauthorized access.
 
 ### VPC Gateway Endpoints
 
-Fargate가 Public IP로 인터넷에 직접 접근 가능하지만, AWS 서비스 트래픽은 VPC Gateway Endpoint를 통해 AWS 내부 네트워크로 라우팅하여 지연 시간을 줄이고 데이터 전송 비용을 절감한다.
+Although Fargate can directly access the internet via Public IP, AWS service traffic is routed through VPC Gateway Endpoints over the AWS internal network to reduce latency and save data transfer costs.
 
-| 서비스 | Endpoint 유형 | 비용 | 이유 |
+| Service | Endpoint Type | Cost | Reason |
 |--------|-------------|------|------|
-| DynamoDB | Gateway | 무료 | 대화 이력 읽기/쓰기 빈번 |
-| S3 | Gateway | 무료 | 파일 백업/설정 접근 |
+| DynamoDB | Gateway | Free | Frequent conversation history reads/writes |
+| S3 | Gateway | Free | File backup/configuration access |
 
-> **참고**: ECR, CloudWatch Logs, Secrets Manager 등은 Fargate의 Public IP를 통해 공개 endpoint로 접근. Interface Endpoint(월 ~$7/개)는 비용 목표에 부합하지 않으므로 사용하지 않는다.
+> **Note**: ECR, CloudWatch Logs, Secrets Manager, etc. are accessed via Fargate's Public IP through public endpoints. Interface Endpoints (~$7/month each) do not align with the cost target and are therefore not used.
 
 ---
 
-## 3. Gateway Lambda 상세 설계
+## 3. Gateway Lambda Detailed Design
 
-Gateway Lambda는 6개의 독립 함수로 분리하여 단일 책임 원칙을 따른다.
+Gateway Lambda is split into 6 independent functions following the single responsibility principle.
 
-### 3.1 함수 목록
+### 3.1 Function List
 
-| 함수 | 트리거 | 역할 | 타임아웃 |
+| Function | Trigger | Role | Timeout |
 |------|--------|------|---------|
-| `ws-connect` | WebSocket $connect | 연결 수립, 인증, connectionId 저장 | 10초 |
-| `ws-message` | WebSocket $default | 메시지 수신, 컨테이너 라우팅 | 30초 |
-| `ws-disconnect` | WebSocket $disconnect | 연결 정리 | 10초 |
-| `telegram-webhook` | REST POST /telegram | Telegram 메시지 수신, 라우팅 | 30초 |
-| `api-handler` | REST GET/POST /api/* | 설정 조회/변경, 대화 이력 | 10초 |
-| `watchdog` | EventBridge (5분 간격) | 좀비 태스크 감지 및 종료 | 60초 |
+| `ws-connect` | WebSocket $connect | Connection establishment, authentication, connectionId storage | 10s |
+| `ws-message` | WebSocket $default | Message reception, container routing | 30s |
+| `ws-disconnect` | WebSocket $disconnect | Connection cleanup | 10s |
+| `telegram-webhook` | REST POST /telegram | Telegram message reception, routing | 30s |
+| `api-handler` | REST GET/POST /api/* | Settings query/update, conversation history | 10s |
+| `watchdog` | EventBridge (5-min interval) | Zombie task detection and termination | 60s |
 
-### 3.2 WebSocket 메시지 처리 흐름
+### 3.2 WebSocket Message Processing Flow
 
 ```mermaid
 sequenceDiagram
-    participant Client as 웹 UI
+    participant Client as Web UI
     participant APIGW as API Gateway WS
     participant Lambda as ws-message
     participant DDB as DynamoDB
     participant ECS as ECS/Fargate
     participant OC as OpenClaw
 
-    Client->>APIGW: 메시지 전송
+    Client->>APIGW: Send message
     APIGW->>Lambda: $default route
 
-    Lambda->>DDB: TaskState 조회 (userId)
-    alt 태스크 실행 중
-        Lambda->>OC: HTTP POST /message (태스크 IP)
-        OC-->>Lambda: 응답 (스트리밍)
-        Lambda-->>APIGW: 응답 전송
-        APIGW-->>Client: 메시지 수신
-    else 태스크 없음
-        Lambda-->>APIGW: "에이전트를 깨우는 중..."
-        APIGW-->>Client: 로딩 상태
+    Lambda->>DDB: Query TaskState (userId)
+    alt Task is running
+        Lambda->>OC: HTTP POST /message (task IP)
+        OC-->>Lambda: Response (streaming)
+        Lambda-->>APIGW: Send response
+        APIGW-->>Client: Receive message
+    else No task
+        Lambda-->>APIGW: "Waking up the agent..."
+        APIGW-->>Client: Loading state
         Lambda->>ECS: runTask()
-        Lambda->>DDB: TaskState 저장 (Starting)
-        Note over ECS,OC: Cold start ~30초-1분
-        ECS->>OC: 컨테이너 시작
-        OC->>DDB: TaskState 업데이트 (Running)
-        OC->>APIGW: 준비 완료 알림
-        APIGW->>Client: 연결 완료
+        Lambda->>DDB: Save TaskState (Starting)
+        Note over ECS,OC: Cold start ~30s-1min
+        ECS->>OC: Start container
+        OC->>DDB: Update TaskState (Running)
+        OC->>APIGW: Ready notification
+        APIGW->>Client: Connection established
     end
 
-    Lambda->>DDB: lastActivity 타임스탬프 갱신
+    Lambda->>DDB: Update lastActivity timestamp
 ```
 
-### 3.3 Telegram 메시지 처리 흐름
+### 3.3 Telegram Message Processing Flow
 
 ```mermaid
 sequenceDiagram
@@ -214,64 +214,64 @@ sequenceDiagram
     participant OC as OpenClaw
 
     TG->>APIGW: POST /telegram (webhook)
-    APIGW->>Lambda: 이벤트 전달
+    APIGW->>Lambda: Forward event
 
-    Lambda->>Lambda: secret token 검증
-    Lambda->>DDB: Settings에서 telegramUserId 확인
-    alt 등록된 사용자
-        Lambda->>DDB: TaskState 조회
-        alt 태스크 실행 중
+    Lambda->>Lambda: Verify secret token
+    Lambda->>DDB: Check telegramUserId in Settings
+    alt Registered user
+        Lambda->>DDB: Query TaskState
+        alt Task is running
             Lambda->>OC: HTTP POST /message
-            OC-->>Lambda: 응답
+            OC-->>Lambda: Response
             Lambda->>TG: sendMessage API
-        else 태스크 없음
-            Lambda->>TG: "에이전트를 깨우는 중..."
+        else No task
+            Lambda->>TG: "Waking up the agent..."
             Lambda->>ECS: runTask()
-            Lambda->>DDB: TaskState 저장
-            Note over Lambda: 비동기 처리 - 컨테이너 시작 후 OC가 직접 TG에 응답
+            Lambda->>DDB: Save TaskState
+            Note over Lambda: Async processing - After container starts, OC responds directly to TG
         end
-    else 미등록 사용자
-        Lambda->>TG: "등록되지 않은 사용자입니다"
+    else Unregistered user
+        Lambda->>TG: "Unregistered user"
     end
 ```
 
-### 3.4 Watchdog (좀비 태스크 감지)
+### 3.4 Watchdog (Zombie Task Detection)
 
 ```mermaid
 graph TD
-    EB[EventBridge\n5분 간격] --> WD[watchdog Lambda]
-    WD --> DDB[TaskState 스캔\n상태=Running]
-    DDB --> Check{lastActivity가\n타임아웃 초과?}
-    Check -->|예| Stop[ECS stopTask]
-    Check -->|아니오| Skip[무시]
+    EB[EventBridge\n5-min interval] --> WD[watchdog Lambda]
+    WD --> DDB[TaskState scan\nstatus=Running]
+    DDB --> Check{lastActivity\nexceeds timeout?}
+    Check -->|Yes| Stop[ECS stopTask]
+    Check -->|No| Skip[Ignore]
     Stop --> Update[TaskState → Idle]
 ```
 
-- **기본 타임아웃**: 15분 (사용자 설정 가능)
-- **스캔 주기**: 5분 (EventBridge rule)
-- **안전장치**: 시작 후 5분 이내 태스크는 종료하지 않음 (cold start 보호)
+- **Default timeout**: 15 minutes (user-configurable)
+- **Scan interval**: 5 minutes (EventBridge rule)
+- **Safety guard**: Tasks within 5 minutes of startup are not terminated (cold start protection)
 
 ---
 
-## 4. OpenClaw 컨테이너 설계
+## 4. OpenClaw Container Design
 
-### 4.1 Docker 이미지 구성
+### 4.1 Docker Image Configuration
 
 ```dockerfile
-# Phase 1: 경량 이미지
+# Phase 1: Lightweight image
 FROM node:20-slim
 
-# OpenClaw 설치
+# Install OpenClaw
 RUN npm install -g openclaw@latest
 
-# Bridge 서버 복사
+# Copy Bridge server
 COPY src/ /app/
 WORKDIR /app
 
-# Bridge 서버 포트
+# Bridge server port
 EXPOSE 8080
 
-# 헬스체크
+# Health check
 HEALTHCHECK --interval=30s --timeout=5s \
   CMD curl -f http://localhost:8080/health || exit 1
 
@@ -279,7 +279,7 @@ CMD ["node", "bridge.js"]
 ```
 
 ```dockerfile
-# Phase 2: Chromium 포함
+# Phase 2: With Chromium
 FROM node:20-slim
 
 RUN apt-get update && apt-get install -y \
@@ -289,170 +289,170 @@ RUN apt-get update && apt-get install -y \
 
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
-# 이하 동일
+# Same as above
 ```
 
-### 4.2 Bridge 서버 아키텍처
+### 4.2 Bridge Server Architecture
 
-Bridge 서버는 Gateway Lambda와 OpenClaw 사이의 중간 레이어.
+The Bridge server is an intermediary layer between Gateway Lambda and OpenClaw.
 
 ```mermaid
 graph TB
-    subgraph "Fargate 컨테이너"
-        Bridge[Bridge 서버\nExpress/Fastify\n:8080]
-        OC[OpenClaw\nNode.js 프로세스]
+    subgraph "Fargate Container"
+        Bridge[Bridge Server\nExpress/Fastify\n:8080]
+        OC[OpenClaw\nNode.js Process]
         LC[Lifecycle Manager]
 
-        Bridge -->|메시지 전달| OC
-        OC -->|응답 반환| Bridge
-        LC -->|상태 관리| Bridge
-        LC -->|타임아웃 감시| OC
+        Bridge -->|Forward messages| OC
+        OC -->|Return responses| Bridge
+        LC -->|State management| Bridge
+        LC -->|Timeout monitoring| OC
     end
 
     Lambda[Gateway Lambda] -->|HTTP| Bridge
-    Bridge -->|WebSocket 콜백| APIGW[API Gateway]
-    Bridge -->|Telegram 콜백| TG[Telegram API]
-    LC -->|상태 업데이트| DDB[DynamoDB]
-    OC -->|데이터 저장| S3[S3]
+    Bridge -->|WebSocket callback| APIGW[API Gateway]
+    Bridge -->|Telegram callback| TG[Telegram API]
+    LC -->|State update| DDB[DynamoDB]
+    OC -->|Store data| S3[S3]
 ```
 
-### 4.3 Bridge API 엔드포인트
+### 4.3 Bridge API Endpoints
 
-| Method | Path | 설명 |
+| Method | Path | Description |
 |--------|------|------|
-| POST | `/message` | 메시지 전달. body: `{ userId, message, channel, callbackUrl }` |
-| GET | `/health` | 헬스체크. `{ status: "ok", uptime, activeConversations }` |
-| POST | `/shutdown` | Graceful shutdown 요청 (Spot 중단 대비) |
-| GET | `/status` | 컨테이너 상태 정보 |
+| POST | `/message` | Forward message. body: `{ userId, message, channel, callbackUrl }` |
+| GET | `/health` | Health check. `{ status: "ok", uptime, activeConversations }` |
+| POST | `/shutdown` | Graceful shutdown request (for Spot interruption handling) |
+| GET | `/status` | Container status information |
 
-### 4.4 컨테이너 → 클라이언트 응답 메커니즘
+### 4.4 Container → Client Response Mechanism
 
-OpenClaw의 응답은 비동기적이므로, Bridge가 콜백 방식으로 클라이언트에 전달:
+Since OpenClaw responses are asynchronous, the Bridge delivers them to clients via a callback mechanism:
 
 ```mermaid
 sequenceDiagram
     participant Lambda as Gateway Lambda
-    participant Bridge as Bridge 서버
+    participant Bridge as Bridge Server
     participant OC as OpenClaw
     participant APIGW as API Gateway
-    participant Client as 클라이언트
+    participant Client as Client
 
     Lambda->>Bridge: POST /message { callbackUrl, connectionId }
-    Bridge->>OC: 메시지 전달
+    Bridge->>OC: Forward message
     Bridge-->>Lambda: 202 Accepted
 
-    OC->>OC: LLM 호출 + 처리
-    OC->>Bridge: 응답 (스트리밍 청크)
+    OC->>OC: LLM call + processing
+    OC->>Bridge: Response (streaming chunks)
 
-    loop 스트리밍 청크마다
+    loop For each streaming chunk
         Bridge->>APIGW: POST @connections/{connectionId}
-        APIGW->>Client: 실시간 메시지
+        APIGW->>Client: Real-time message
     end
 
-    Bridge->>APIGW: 완료 표시
+    Bridge->>APIGW: Completion marker
 ```
 
-### 4.5 Fargate 태스크 정의
+### 4.5 Fargate Task Definition
 
-| 항목 | 값 | 비고 |
+| Item | Value | Notes |
 |------|-----|------|
-| CPU | 0.25 vCPU (256 units) | Fargate 최소 사양 |
-| Memory | 0.5 GB (512 MB) | 최소 사양, Phase 2에서 1GB 이상 필요 |
-| Platform | LINUX/ARM64 | Graviton (Spot 가용성 높음 + 20% 저렴) |
-| Capacity Provider | FARGATE_SPOT | 70% 할인 |
-| Task Role | openclaw-task-role | DynamoDB, S3, SSM 접근 |
+| CPU | 0.25 vCPU (256 units) | Fargate minimum spec |
+| Memory | 0.5 GB (512 MB) | Minimum spec, 1GB+ required in Phase 2 |
+| Platform | LINUX/ARM64 | Graviton (higher Spot availability + 20% cheaper) |
+| Capacity Provider | FARGATE_SPOT | 70% discount |
+| Task Role | openclaw-task-role | DynamoDB, S3, SSM access |
 | Execution Role | openclaw-exec-role | ECR pull, CloudWatch logs |
-| Log Driver | awslogs | CloudWatch Logs 그룹으로 전송 |
-| Assign Public IP | true | 퍼블릭 서브넷, 직접 인터넷 접근 (NAT 불필요) |
+| Log Driver | awslogs | Send to CloudWatch Logs group |
+| Assign Public IP | true | Public subnet, direct internet access (no NAT needed) |
 
-### 4.6 Spot 중단 대응
+### 4.6 Spot Interruption Handling
 
 ```mermaid
 sequenceDiagram
     participant AWS as AWS
-    participant Bridge as Bridge 서버
+    participant Bridge as Bridge Server
     participant OC as OpenClaw
     participant DDB as DynamoDB
     participant S3 as S3
 
-    AWS->>Bridge: SIGTERM (2분 전 경고)
-    Bridge->>OC: 현재 작업 완료 요청
-    OC->>DDB: 대화 상태 저장
-    OC->>S3: 설정/데이터 백업
+    AWS->>Bridge: SIGTERM (2-minute warning)
+    Bridge->>OC: Request current work completion
+    OC->>DDB: Save conversation state
+    OC->>S3: Backup settings/data
     Bridge->>DDB: TaskState → Idle
     Bridge->>Bridge: Graceful shutdown
 ```
 
 ---
 
-## 5. DynamoDB 테이블 상세 설계
+## 5. DynamoDB Table Detailed Design
 
-### 5.1 Conversations 테이블
+### 5.1 Conversations Table
 
-대화 이력을 저장. 단일 테이블 설계로 사용자별 대화를 효율적으로 조회.
+Stores conversation history. Uses single-table design for efficient per-user conversation queries.
 
-| 속성 | 타입 | 설명 |
+| Attribute | Type | Description |
 |------|------|------|
 | **PK** | S | `USER#{userId}` |
 | **SK** | S | `CONV#{conversationId}#MSG#{timestamp}` |
 | role | S | `user` / `assistant` / `system` |
-| content | S | 메시지 내용 |
+| content | S | Message content |
 | channel | S | `web` / `telegram` |
-| metadata | M | 토큰 수, LLM 모델명 등 |
-| ttl | N | TTL 타임스탬프 (대화 보존 기간) |
+| metadata | M | Token count, LLM model name, etc. |
+| ttl | N | TTL timestamp (conversation retention period) |
 
-**접근 패턴:**
+**Access Patterns:**
 
-| 패턴 | 쿼리 |
+| Pattern | Query |
 |------|------|
-| 사용자의 대화 목록 | PK = `USER#{userId}`, SK begins_with `CONV#` |
-| 특정 대화의 메시지 | PK = `USER#{userId}`, SK begins_with `CONV#{convId}#MSG#` |
-| 최근 N개 메시지 | 위 쿼리 + ScanIndexForward=false, Limit=N |
+| User's conversation list | PK = `USER#{userId}`, SK begins_with `CONV#` |
+| Messages for a specific conversation | PK = `USER#{userId}`, SK begins_with `CONV#{convId}#MSG#` |
+| Most recent N messages | Above query + ScanIndexForward=false, Limit=N |
 
-### 5.2 Settings 테이블
+### 5.2 Settings Table
 
-사용자 설정 및 시스템 구성.
+User settings and system configuration.
 
-| 속성 | 타입 | 설명 |
+| Attribute | Type | Description |
 |------|------|------|
 | **PK** | S | `USER#{userId}` |
 | **SK** | S | `SETTING#{key}` |
-| value | S / M | 설정 값 |
-| updatedAt | S | ISO 8601 타임스탬프 |
+| value | S / M | Setting value |
+| updatedAt | S | ISO 8601 timestamp |
 
-**주요 설정 키:**
+**Key Setting Keys:**
 
-| SK | 값 예시 | 설명 |
+| SK | Example Value | Description |
 |----|--------|------|
-| `SETTING#llm_provider` | `{ provider: "anthropic", model: "claude-sonnet-4-5-20250929" }` | LLM 프로바이더 |
-| `SETTING#telegram` | `{ telegramUserId: "123456", paired: true }` | Telegram 페어링 |
-| `SETTING#timeout` | `{ minutes: 15 }` | 비활성 타임아웃 |
-| `SETTING#skills` | `{ enabled: ["browser", "calendar"] }` | 활성 Skills |
+| `SETTING#llm_provider` | `{ provider: "anthropic", model: "claude-sonnet-4-5-20250929" }` | LLM provider |
+| `SETTING#telegram` | `{ telegramUserId: "123456", paired: true }` | Telegram pairing |
+| `SETTING#timeout` | `{ minutes: 15 }` | Inactivity timeout |
+| `SETTING#skills` | `{ enabled: ["browser", "calendar"] }` | Enabled skills |
 
-### 5.3 TaskState 테이블
+### 5.3 TaskState Table
 
-Fargate 태스크 상태 추적.
+Tracks Fargate task state.
 
-| 속성 | 타입 | 설명 |
+| Attribute | Type | Description |
 |------|------|------|
 | **PK** | S | `USER#{userId}` |
-| taskArn | S | ECS 태스크 ARN |
+| taskArn | S | ECS task ARN |
 | status | S | `Idle` / `Starting` / `Running` / `Stopping` |
-| publicIp | S | 태스크 퍼블릭 IP (Running 시) |
-| startedAt | S | 시작 시각 |
-| lastActivity | S | 마지막 활동 시각 |
-| ttl | N | 자동 삭제용 TTL |
+| publicIp | S | Task public IP (when Running) |
+| startedAt | S | Start time |
+| lastActivity | S | Last activity time |
+| ttl | N | TTL for automatic deletion |
 
-### 5.4 Connections 테이블
+### 5.4 Connections Table
 
-WebSocket 연결 관리.
+WebSocket connection management.
 
-| 속성 | 타입 | 설명 |
+| Attribute | Type | Description |
 |------|------|------|
 | **PK** | S | `CONN#{connectionId}` |
-| userId | S | 연결된 사용자 ID |
-| connectedAt | S | 연결 시각 |
-| ttl | N | 24시간 후 자동 삭제 |
+| userId | S | Connected user ID |
+| connectedAt | S | Connection time |
+| ttl | N | Automatic deletion after 24 hours |
 
 **GSI (userId-index):**
 
@@ -460,61 +460,61 @@ WebSocket 연결 관리.
 |--------|--------|
 | userId | connectedAt |
 
-> 사용자의 활성 WebSocket 연결을 조회하여 메시지를 브로드캐스트할 때 사용.
+> Used to query a user's active WebSocket connections for broadcasting messages.
 
-### 5.5 PendingMessages 테이블
+### 5.5 PendingMessages Table
 
-Cold start 중 유실 방지를 위한 메시지 큐. 컨테이너가 시작되기 전에 도착한 메시지를 임시 저장하고, Bridge가 시작 후 소비한다.
+Message queue to prevent loss during cold start. Temporarily stores messages that arrive before the container starts, and the Bridge consumes them after startup.
 
-| 속성 | 타입 | 설명 |
+| Attribute | Type | Description |
 |------|------|------|
 | **PK** | S | `USER#{userId}` |
 | **SK** | S | `MSG#{timestamp}#{uuid}` |
-| message | S | 사용자 메시지 내용 |
+| message | S | User message content |
 | channel | S | `web` / `telegram` |
-| connectionId | S | 응답을 보낼 WebSocket connectionId |
-| createdAt | S | ISO 8601 타임스탬프 |
-| ttl | N | 5분 후 자동 삭제 (미처리 메시지 정리) |
+| connectionId | S | WebSocket connectionId for sending responses |
+| createdAt | S | ISO 8601 timestamp |
+| ttl | N | Automatic deletion after 5 minutes (cleanup of unprocessed messages) |
 
-**처리 흐름:**
-1. Lambda: 컨테이너 미실행 시 → PendingMessages에 메시지 저장 + RunTask
-2. Bridge 시작: DynamoDB에서 userId의 PendingMessages 조회 (SK begins_with `MSG#`)
-3. Bridge: 각 대기 메시지를 OpenClaw Gateway에 순서대로 전달
-4. Bridge: 처리 완료된 메시지 삭제 (`DeleteItem`)
+**Processing Flow:**
+1. Lambda: When the container is not running → Save message to PendingMessages + RunTask
+2. Bridge startup: Query PendingMessages for the userId from DynamoDB (SK begins_with `MSG#`)
+3. Bridge: Forward each pending message to OpenClaw Gateway in order
+4. Bridge: Delete processed messages (`DeleteItem`)
 
-> **TTL 안전장치**: 5분 TTL로 Bridge가 비정상 종료되어도 대기 메시지가 무한히 쌓이지 않는다.
+> **TTL Safety Guard**: The 5-minute TTL ensures that pending messages do not accumulate indefinitely even if the Bridge terminates abnormally.
 
 ---
 
-## 6. API Gateway 설계
+## 6. API Gateway Design
 
 ### 6.1 WebSocket API
 
-| Route | Lambda | 인증 | 설명 |
+| Route | Lambda | Auth | Description |
 |-------|--------|------|------|
-| `$connect` | ws-connect | Cognito JWT (query string) | 연결 수립 |
-| `$default` | ws-message | connectionId로 식별 | 메시지 처리 |
-| `$disconnect` | ws-disconnect | connectionId로 식별 | 연결 종료 |
+| `$connect` | ws-connect | Cognito JWT (query string) | Connection establishment |
+| `$default` | ws-message | Identified by connectionId | Message processing |
+| `$disconnect` | ws-disconnect | Identified by connectionId | Connection termination |
 
-**연결 시 인증:**
+**Authentication on Connection:**
 
 ```
 wss://xxx.execute-api.region.amazonaws.com/prod?token={jwt_token}
 ```
 
-ws-connect Lambda에서 JWT를 검증하고, connectionId와 userId를 Connections 테이블에 저장.
+The ws-connect Lambda validates the JWT and stores the connectionId and userId in the Connections table.
 
-**메시지 프로토콜:**
+**Message Protocol:**
 
 ```typescript
-// 클라이언트 → 서버
+// Client → Server
 interface ClientMessage {
   action: "sendMessage" | "getHistory" | "getStatus";
   conversationId?: string;
   message?: string;
 }
 
-// 서버 → 클라이언트
+// Server → Client
 interface ServerMessage {
   type: "message" | "status" | "error" | "stream_chunk" | "stream_end";
   conversationId?: string;
@@ -526,23 +526,23 @@ interface ServerMessage {
 
 ### 6.2 REST API
 
-| Method | Path | Lambda | 인증 | 설명 |
+| Method | Path | Lambda | Auth | Description |
 |--------|------|--------|------|------|
 | POST | `/telegram` | telegram-webhook | Telegram secret | Telegram webhook |
-| GET | `/api/conversations` | api-handler | Cognito JWT | 대화 목록 |
-| GET | `/api/conversations/{id}` | api-handler | Cognito JWT | 대화 상세 |
-| GET | `/api/settings` | api-handler | Cognito JWT | 설정 조회 |
-| PUT | `/api/settings` | api-handler | Cognito JWT | 설정 변경 |
-| GET | `/api/status` | api-handler | Cognito JWT | 컨테이너 상태 |
-| POST | `/api/container/start` | api-handler | Cognito JWT | 수동 시작 |
-| POST | `/api/container/stop` | api-handler | Cognito JWT | 수동 종료 |
+| GET | `/api/conversations` | api-handler | Cognito JWT | Conversation list |
+| GET | `/api/conversations/{id}` | api-handler | Cognito JWT | Conversation details |
+| GET | `/api/settings` | api-handler | Cognito JWT | Settings query |
+| PUT | `/api/settings` | api-handler | Cognito JWT | Settings update |
+| GET | `/api/status` | api-handler | Cognito JWT | Container status |
+| POST | `/api/container/start` | api-handler | Cognito JWT | Manual start |
+| POST | `/api/container/stop` | api-handler | Cognito JWT | Manual stop |
 
 ### 6.3 Cognito Authorizer
 
-REST API에 Cognito User Pool Authorizer를 연결하여 JWT를 자동 검증:
+A Cognito User Pool Authorizer is attached to the REST API for automatic JWT validation:
 
 ```typescript
-// CDK 정의 예시
+// CDK definition example
 const authorizer = new apigateway.CognitoUserPoolsAuthorizer(this, "Authorizer", {
   cognitoUserPools: [userPool],
 });
@@ -555,19 +555,19 @@ api.addMethod("GET", integration, {
 
 ---
 
-## 7. 인증 및 보안 설계
+## 7. Authentication and Security Design
 
-### 7.1 Cognito User Pool 구성
+### 7.1 Cognito User Pool Configuration
 
-| 항목 | 설정 |
+| Item | Setting |
 |------|------|
-| 로그인 속성 | 이메일 |
-| MFA | 선택적 (TOTP) |
-| 비밀번호 정책 | 최소 8자, 대/소/숫자/특수문자 |
-| 셀프 서비스 가입 | 활성화 (이메일 인증 필수) |
-| 토큰 만료 | Access: 1시간, Refresh: 30일 |
+| Sign-in attribute | Email |
+| MFA | Optional (TOTP) |
+| Password policy | Minimum 8 characters, upper/lower/numbers/special characters |
+| Self-service sign-up | Enabled (email verification required) |
+| Token expiration | Access: 1 hour, Refresh: 30 days |
 
-### 7.2 Telegram 인증 흐름
+### 7.2 Telegram Authentication Flow
 
 ```mermaid
 sequenceDiagram
@@ -577,33 +577,33 @@ sequenceDiagram
     participant Lambda
     participant DDB as DynamoDB
 
-    Note over User,WebUI: 1단계: 웹 UI에서 페어링 코드 생성
-    User->>WebUI: "Telegram 연동" 클릭
+    Note over User,WebUI: Step 1: Generate pairing code in web UI
+    User->>WebUI: Click "Link Telegram"
     WebUI->>Lambda: POST /api/telegram/pair
-    Lambda->>DDB: 페어링 코드 저장 (6자리, 5분 만료)
-    Lambda-->>WebUI: 페어링 코드 표시
+    Lambda->>DDB: Save pairing code (6 digits, 5-min expiry)
+    Lambda-->>WebUI: Display pairing code
 
-    Note over User,TGBot: 2단계: Telegram에서 페어링
-    User->>TGBot: /pair {코드}
+    Note over User,TGBot: Step 2: Pair in Telegram
+    User->>TGBot: /pair {code}
     TGBot->>Lambda: webhook
-    Lambda->>DDB: 코드 검증 + telegramUserId 저장
-    Lambda->>TGBot: "페어링 완료"
-    Lambda->>WebUI: WebSocket으로 상태 갱신
+    Lambda->>DDB: Verify code + save telegramUserId
+    Lambda->>TGBot: "Pairing complete"
+    Lambda->>WebUI: Status update via WebSocket
 ```
 
-### 7.3 시크릿 관리
+### 7.3 Secrets Management
 
-| 시크릿 | 저장소 | 접근 주체 |
+| Secret | Storage | Accessed By |
 |--------|-------|----------|
 | Telegram Bot Token | Secrets Manager | Lambda (telegram-webhook) |
-| LLM API Keys (Claude, GPT 등) | Secrets Manager | Fargate (OpenClaw) |
+| LLM API Keys (Claude, GPT, etc.) | Secrets Manager | Fargate (OpenClaw) |
 | Cognito Client Secret | SSM Parameter Store | Lambda (api-handler) |
 | WebSocket Callback URL | SSM Parameter Store | Fargate (Bridge) |
-| Database 설정 | 환경 변수 (CDK 주입) | Lambda, Fargate |
+| Database settings | Environment variables (CDK-injected) | Lambda, Fargate |
 
-### 7.4 IAM 역할
+### 7.4 IAM Roles
 
-**Lambda 실행 역할 (`gateway-lambda-role`):**
+**Lambda execution role (`gateway-lambda-role`):**
 
 ```json
 {
@@ -638,7 +638,7 @@ sequenceDiagram
 }
 ```
 
-**Fargate 태스크 역할 (`openclaw-task-role`):**
+**Fargate task role (`openclaw-task-role`):**
 
 ```json
 {
@@ -672,111 +672,111 @@ sequenceDiagram
 }
 ```
 
-### 7.5 Public IP 다층 방어 전략
+### 7.5 Public IP Multi-Layer Defense Strategy
 
-Fargate에 Public IP를 할당하여 NAT Gateway를 제거하므로, Bridge 서버(`:8080`)가 인터넷에 노출된다. 다음 계층별 방어로 보안을 확보한다.
+Since Public IPs are assigned to Fargate to eliminate the NAT Gateway, the Bridge server (`:8080`) is exposed to the internet. Security is ensured through the following layered defenses.
 
 ```mermaid
 graph TD
-    Internet[인터넷] --> SG[Security Group\n8080만 허용]
-    SG --> Bridge[Bridge 서버\nBearer 토큰 인증]
-    Bridge --> GW[OpenClaw Gateway\nlocalhost:18789\n외부 접근 불가]
+    Internet[Internet] --> SG[Security Group\nAllow 8080 only]
+    SG --> Bridge[Bridge Server\nBearer Token Auth]
+    Bridge --> GW[OpenClaw Gateway\nlocalhost:18789\nNo external access]
 ```
 
-| 계층 | 대책 | 방어 대상 | 비용 |
+| Layer | Measure | Defends Against | Cost |
 |------|------|----------|------|
-| Security Group | 인바운드 8080만 허용, 나머지 전체 차단 | 포트 스캐닝, 불필요한 서비스 노출 | $0 |
-| Bridge 인증 | `Authorization: Bearer <token>` 검증. `/health` 외 모든 엔드포인트 필수 | 무단 API 호출 | $0 |
-| Gateway localhost 바인딩 | `--bind localhost` — 18789 포트는 컨테이너 내부에서만 접근 | Gateway 직접 접근 차단 | $0 |
-| 토큰 관리 | Secrets Manager 저장, 환경 변수로 주입. 디스크 미기록 | 토큰 유출 | ~$0.40/월 |
-| 비root 컨테이너 | `USER openclaw` — 비특권 사용자로 실행 | 컨테이너 탈출 시 권한 상승 | $0 |
-| TLS | Bridge에 자체 서명 인증서 적용 (Node.js `https.createServer`) | 토큰 스니핑 (평문 HTTP 구간) | $0 |
+| Security Group | Allow inbound 8080 only, block all others | Port scanning, unnecessary service exposure | $0 |
+| Bridge Auth | `Authorization: Bearer <token>` validation. Required for all endpoints except `/health` | Unauthorized API calls | $0 |
+| Gateway localhost binding | `--bind localhost` — port 18789 only accessible within the container | Direct Gateway access blocked | $0 |
+| Token management | Stored in Secrets Manager, injected via environment variables. Never written to disk | Token leakage | ~$0.40/month |
+| Non-root container | `USER openclaw` — runs as unprivileged user | Privilege escalation on container escape | $0 |
+| TLS | Self-signed certificate on Bridge (Node.js `https.createServer`) | Token sniffing (plaintext HTTP segment) | $0 |
 
-> **비용 영향**: 다층 방어 전체가 Secrets Manager 1개 시크릿($0.40/월) 외에는 추가 비용 없음.
+> **Cost Impact**: The entire multi-layer defense adds no cost beyond a single Secrets Manager secret ($0.40/month).
 
-### 7.6 Bridge 인증 상세
+### 7.6 Bridge Authentication Details
 
 ```
-Lambda → Bridge 요청:
+Lambda → Bridge request:
   POST https://{publicIp}:8080/message
   Headers:
     Authorization: Bearer {BRIDGE_AUTH_TOKEN}
     Content-Type: application/json
   Body: { userId, message, channel, connectionId, callbackUrl }
 
-Bridge 검증:
-  1. Authorization 헤더에서 Bearer 토큰 추출
-  2. 환경 변수 BRIDGE_AUTH_TOKEN과 일치 여부 확인
-  3. 불일치 시 401 Unauthorized 즉시 반환
-  4. /health 엔드포인트만 인증 면제 (ECS 헬스체크용)
+Bridge validation:
+  1. Extract Bearer token from Authorization header
+  2. Verify match against BRIDGE_AUTH_TOKEN environment variable
+  3. Return 401 Unauthorized immediately on mismatch
+  4. Only /health endpoint is exempt from auth (for ECS health checks)
 ```
 
-**토큰 생명주기:**
-- CDK 배포 시 Secrets Manager에 자동 생성 (32바이트 랜덤)
-- Lambda 환경 변수와 Fargate 컨테이너 환경 변수에 동일 토큰 주입
-- 토큰 로테이션: Secrets Manager 자동 로테이션 + 컨테이너 재시작으로 적용
+**Token Lifecycle:**
+- Automatically generated in Secrets Manager during CDK deployment (32-byte random)
+- Same token injected into both Lambda environment variables and Fargate container environment variables
+- Token rotation: Secrets Manager automatic rotation + container restart to apply
 
-### 7.7 컨테이너 보안 강화
+### 7.7 Container Security Hardening
 
-| 항목 | 설정 | 이유 |
+| Item | Setting | Reason |
 |------|------|------|
-| 실행 사용자 | `openclaw` (비root) | OpenClaw skills가 임의 코드를 실행할 수 있으므로 root 권한 제한 |
-| 읽기 전용 루트 파일시스템 | `readonlyRootFilesystem: true` (Phase 2) | 컨테이너 변조 방지 |
-| Gateway 바인딩 | `--bind localhost` | 18789 포트 외부 노출 차단 |
-| EXPOSE | 8080만 | 18789는 localhost 전용이므로 노출 불필요 |
-| 시크릿 전달 | 환경 변수 (Secrets Manager → ECS) | 디스크에 API 키 미기록. `openclaw.json`에 토큰 미포함 |
-| 홈 디렉토리 | `/home/openclaw/` | `/root/` 대신 비root 사용자 홈 사용 |
+| Execution user | `openclaw` (non-root) | OpenClaw skills can execute arbitrary code, so root privileges are restricted |
+| Read-only root filesystem | `readonlyRootFilesystem: true` (Phase 2) | Prevent container tampering |
+| Gateway binding | `--bind localhost` | Block external exposure of port 18789 |
+| EXPOSE | 8080 only | 18789 is localhost-only, no exposure needed |
+| Secret delivery | Environment variables (Secrets Manager → ECS) | No API keys written to disk. Tokens not included in `openclaw.json` |
+| Home directory | `/home/openclaw/` | Uses non-root user home instead of `/root/` |
 
-### 7.8 IDOR (Insecure Direct Object Reference) 방지
+### 7.8 IDOR (Insecure Direct Object Reference) Prevention
 
-모든 API 경로에서 인증된 사용자가 자신의 리소스만 접근 가능하도록 강제한다.
+All API paths enforce that authenticated users can only access their own resources.
 
-| 계층 | 검증 로직 |
+| Layer | Validation Logic |
 |------|----------|
-| **ws-message Lambda** | connectionId → Connections 테이블에서 userId 조회 → 요청의 userId와 일치 여부 확인 |
-| **Bridge /message** | Lambda가 전달한 userId만 사용. 클라이언트 입력 userId 무시 |
-| **REST API (대화 이력)** | JWT에서 추출한 userId로만 DynamoDB 쿼리 (PK = `USER#{jwt.sub}`) |
-| **Telegram webhook** | 페어링된 telegramUserId → userId 매핑 테이블 조회. 미페어링 사용자 거부 |
+| **ws-message Lambda** | connectionId → Look up userId from Connections table → Verify match with request userId |
+| **Bridge /message** | Only uses the userId passed by Lambda. Client-provided userId is ignored |
+| **REST API (conversation history)** | DynamoDB queries use only the userId extracted from JWT (PK = `USER#{jwt.sub}`) |
+| **Telegram webhook** | Look up paired telegramUserId → userId mapping table. Reject unpaired users |
 
-> **원칙**: userId는 항상 서버 측에서 결정 (JWT 또는 connectionId 역조회). 클라이언트가 보낸 userId를 신뢰하지 않는다.
+> **Principle**: userId is always determined server-side (via JWT or connectionId reverse lookup). Never trust userId sent by the client.
 
-### 7.9 시크릿 디스크 미기록 원칙
+### 7.9 Secrets Never Written to Disk Principle
 
-컨테이너 파일시스템에 API 키, 토큰 등 시크릿이 기록되지 않도록 한다.
+Ensures that API keys, tokens, and other secrets are never written to the container filesystem.
 
-| 시크릿 | 전달 방식 | 디스크 기록 여부 |
+| Secret | Delivery Method | Written to Disk |
 |--------|----------|----------------|
-| ANTHROPIC_API_KEY | Secrets Manager → ECS 환경 변수 | **미기록** — `openclaw.json`에 포함하지 않음 |
-| BRIDGE_AUTH_TOKEN | Secrets Manager → ECS 환경 변수 | **미기록** |
-| OPENCLAW_GATEWAY_TOKEN | Secrets Manager → ECS 환경 변수 | **미기록** — CLI `--token` 인자 대신 환경 변수 사용 |
-| TELEGRAM_BOT_TOKEN | SSM Parameter Store → Lambda 환경 변수 | **미기록** — 컨테이너에 전달하지 않음 (webhook-only 방식) |
+| ANTHROPIC_API_KEY | Secrets Manager → ECS environment variable | **Never** — not included in `openclaw.json` |
+| BRIDGE_AUTH_TOKEN | Secrets Manager → ECS environment variable | **Never** |
+| OPENCLAW_GATEWAY_TOKEN | Secrets Manager → ECS environment variable | **Never** — uses environment variable instead of CLI `--token` argument |
+| TELEGRAM_BOT_TOKEN | SSM Parameter Store → Lambda environment variable | **Never** — not passed to container (webhook-only approach) |
 
-**Config 패치 시 주의:**
+**Caution When Patching Config:**
 
 ```typescript
-// patch-config.ts — 시크릿을 config 파일에 기록하지 않음
-// API 키는 환경 변수로만 전달, config에는 프로바이더/모델 설정만 기록
-config.auth = { method: "env" }; // "apiKey" 대신 환경 변수 참조
-delete config.auth?.apiKey;       // 혹시 존재하면 제거
+// patch-config.ts — Do not write secrets to config files
+// API keys are delivered only via environment variables; config contains only provider/model settings
+config.auth = { method: "env" }; // Reference environment variable instead of "apiKey"
+delete config.auth?.apiKey;       // Remove if it exists
 ```
 
-> **MoltWorker와의 차이**: MoltWorker는 `openclaw.json`에 API 키를 직접 기록하고 R2에 백업한다. 우리는 Secrets Manager를 통해 환경 변수로만 전달하여 S3 백업에 시크릿이 포함되지 않도록 한다.
+> **Difference from MoltWorker**: MoltWorker writes API keys directly to `openclaw.json` and backs them up to R2. We deliver them only via environment variables through Secrets Manager, ensuring secrets are not included in S3 backups.
 
 ---
 
-## 8. CDK 스택 설계
+## 8. CDK Stack Design
 
-각 스택은 독립적으로 배포 가능하되, 의존 관계를 CDK에서 관리.
+Each stack is independently deployable, with dependency relationships managed by CDK.
 
 ```mermaid
 graph TD
     App[CDK App]
-    NS[NetworkStack\nVPC, 퍼블릭 서브넷, VPC Endpoints]
+    NS[NetworkStack\nVPC, Public Subnets, VPC Endpoints]
     SS[StorageStack\nDynamoDB, S3, ECR]
     AS[AuthStack\nCognito]
     CS[ComputeStack\nECS, Fargate Task Def]
     APIS[ApiStack\nAPI Gateway, Lambda]
-    WS[WebStack\nS3 호스팅, CloudFront]
+    WS[WebStack\nS3 Hosting, CloudFront]
 
     App --> NS
     App --> SS
@@ -790,23 +790,23 @@ graph TD
     APIS --> WS
 ```
 
-### 스택별 리소스
+### Resources per Stack
 
-| 스택 | 리소스 | 의존성 |
+| Stack | Resources | Dependencies |
 |------|--------|--------|
-| **NetworkStack** | VPC, 퍼블릭 서브넷, VPC Gateway Endpoints (DynamoDB, S3) | 없음 |
-| **StorageStack** | DynamoDB 테이블 5개, S3 버킷 2개, ECR 리포지토리 | 없음 |
-| **AuthStack** | Cognito User Pool, App Client | 없음 |
-| **ComputeStack** | ECS 클러스터, Fargate 태스크 정의, IAM 역할 | Network, Storage |
-| **ApiStack** | API Gateway (WS+REST), Lambda 함수 6개, IAM 역할 | Network, Storage, Auth, Compute |
-| **WebStack** | S3 버킷(웹), CloudFront 배포 | Api (WebSocket URL 주입) |
+| **NetworkStack** | VPC, Public Subnets, VPC Gateway Endpoints (DynamoDB, S3) | None |
+| **StorageStack** | 5 DynamoDB tables, 2 S3 buckets, ECR repository | None |
+| **AuthStack** | Cognito User Pool, App Client | None |
+| **ComputeStack** | ECS Cluster, Fargate task definition, IAM roles | Network, Storage |
+| **ApiStack** | API Gateway (WS+REST), 6 Lambda functions, IAM roles | Network, Storage, Auth, Compute |
+| **WebStack** | S3 bucket (web), CloudFront distribution | Api (WebSocket URL injection) |
 
-### 환경 변수 및 설정 주입
+### Environment Variables and Configuration Injection
 
-CDK에서 Lambda/Fargate에 주입하는 설정:
+Settings injected from CDK into Lambda/Fargate:
 
 ```typescript
-// Lambda 환경 변수
+// Lambda environment variables
 {
   DYNAMODB_TABLE_PREFIX: "serverless-openclaw",
   ECS_CLUSTER_ARN: cluster.clusterArn,
@@ -817,7 +817,7 @@ CDK에서 Lambda/Fargate에 주입하는 설정:
   TELEGRAM_SECRET_ARN: telegramSecret.secretArn,
 }
 
-// Fargate 환경 변수
+// Fargate environment variables
 {
   DYNAMODB_TABLE_PREFIX: "serverless-openclaw",
   S3_DATA_BUCKET: dataBucket.bucketName,
@@ -829,44 +829,44 @@ CDK에서 Lambda/Fargate에 주입하는 설정:
 
 ---
 
-## 9. 프론트엔드 설계
+## 9. Frontend Design
 
-### 9.1 React SPA 구성
+### 9.1 React SPA Structure
 
 ```
 packages/web/src/
 ├── components/
 │   ├── Chat/
-│   │   ├── ChatContainer.tsx    # 메인 채팅 컨테이너
-│   │   ├── MessageList.tsx      # 메시지 목록 (가상 스크롤)
-│   │   ├── MessageBubble.tsx    # 개별 메시지 버블
-│   │   ├── MessageInput.tsx     # 입력 폼
-│   │   └── StreamingMessage.tsx # LLM 스트리밍 응답 표시
+│   │   ├── ChatContainer.tsx    # Main chat container
+│   │   ├── MessageList.tsx      # Message list (virtual scrolling)
+│   │   ├── MessageBubble.tsx    # Individual message bubble
+│   │   ├── MessageInput.tsx     # Input form
+│   │   └── StreamingMessage.tsx # LLM streaming response display
 │   ├── Auth/
-│   │   ├── LoginForm.tsx        # 로그인 폼
-│   │   └── AuthProvider.tsx     # Cognito 인증 컨텍스트
+│   │   ├── LoginForm.tsx        # Login form
+│   │   └── AuthProvider.tsx     # Cognito auth context
 │   ├── Status/
-│   │   ├── AgentStatus.tsx      # 에이전트 상태 표시
-│   │   └── ColdStartBanner.tsx  # "깨우는 중..." 배너
+│   │   ├── AgentStatus.tsx      # Agent status display
+│   │   └── ColdStartBanner.tsx  # "Waking up..." banner
 │   └── Settings/
-│       ├── SettingsPanel.tsx     # 설정 패널
-│       ├── LLMSelector.tsx      # LLM 프로바이더 선택
-│       └── TelegramPair.tsx     # Telegram 페어링 UI
+│       ├── SettingsPanel.tsx     # Settings panel
+│       ├── LLMSelector.tsx      # LLM provider selector
+│       └── TelegramPair.tsx     # Telegram pairing UI
 ├── hooks/
-│   ├── useWebSocket.ts          # WebSocket 연결 관리
-│   ├── useAuth.ts               # Cognito 인증 훅
-│   └── useAgentStatus.ts        # 에이전트 상태 훅
+│   ├── useWebSocket.ts          # WebSocket connection management
+│   ├── useAuth.ts               # Cognito auth hook
+│   └── useAgentStatus.ts        # Agent status hook
 ├── services/
-│   ├── websocket.ts             # WebSocket 클라이언트
-│   ├── api.ts                   # REST API 클라이언트
-│   └── auth.ts                  # Cognito Auth 래퍼
+│   ├── websocket.ts             # WebSocket client
+│   ├── api.ts                   # REST API client
+│   └── auth.ts                  # Cognito Auth wrapper
 ├── types/
-│   └── index.ts                 # 공유 타입
+│   └── index.ts                 # Shared types
 ├── App.tsx
 └── main.tsx
 ```
 
-### 9.2 WebSocket 연결 관리
+### 9.2 WebSocket Connection Management
 
 ```mermaid
 stateDiagram-v2
@@ -875,58 +875,58 @@ stateDiagram-v2
     Connecting --> Connected: onopen
     Connecting --> Disconnected: onerror/timeout
     Connected --> Disconnected: onclose
-    Connected --> Reconnecting: 연결 끊김 감지
-    Reconnecting --> Connected: 재연결 성공
-    Reconnecting --> Disconnected: 최대 재시도 초과
+    Connected --> Reconnecting: Disconnection detected
+    Reconnecting --> Connected: Reconnection succeeded
+    Reconnecting --> Disconnected: Max retries exceeded
 ```
 
-- **자동 재연결**: 지수 백오프 (1초, 2초, 4초... 최대 30초)
-- **하트비트**: 30초 간격 ping으로 연결 유지
-- **토큰 갱신**: Access Token 만료 시 Refresh Token으로 자동 갱신 후 재연결
+- **Auto-reconnect**: Exponential backoff (1s, 2s, 4s... max 30s)
+- **Heartbeat**: Ping every 30 seconds to maintain connection
+- **Token refresh**: Automatically refresh with Refresh Token on Access Token expiry, then reconnect
 
-### 9.3 배포 설정
+### 9.3 Deployment Settings
 
-| 항목 | 값 |
+| Item | Value |
 |------|-----|
-| S3 버킷 | `serverless-openclaw-web-{accountId}` |
-| CloudFront | OAI로 S3 접근, HTTPS 전용 |
-| 캐시 정책 | index.html: no-cache, assets: 1년 캐시 (hash 기반) |
-| SPA 라우팅 | CloudFront 404 → index.html 리다이렉트 |
-| 환경 변수 | 빌드 시 `VITE_WS_URL`, `VITE_API_URL`, `VITE_COGNITO_*` 주입 |
+| S3 bucket | `serverless-openclaw-web-{accountId}` |
+| CloudFront | OAI for S3 access, HTTPS only |
+| Cache policy | index.html: no-cache, assets: 1-year cache (hash-based) |
+| SPA routing | CloudFront 404 → index.html redirect |
+| Environment variables | Injected at build time: `VITE_WS_URL`, `VITE_API_URL`, `VITE_COGNITO_*` |
 
 ---
 
-## 10. 배포 파이프라인
+## 10. Deployment Pipeline
 
-### 10.1 초기 배포 (사용자)
+### 10.1 Initial Deployment (User)
 
 ```bash
-# 1. 사전 요구사항
+# 1. Prerequisites
 npm install -g aws-cdk
-aws configure  # AWS 자격 증명 설정
+aws configure  # Set up AWS credentials
 
-# 2. 레포지토리 클론 및 의존성 설치
+# 2. Clone repository and install dependencies
 git clone https://github.com/serithemage/serverless-openclaw.git
 cd serverless-openclaw
 npm install
 
-# 3. 환경 설정
+# 3. Environment setup
 cp .env.example .env
-# .env 편집: Telegram Bot Token, LLM API Key 등 입력
+# Edit .env: Enter Telegram Bot Token, LLM API Key, etc.
 
-# 4. CDK 부트스트랩 (최초 1회)
+# 4. CDK bootstrap (one-time only)
 cdk bootstrap
 
-# 5. Docker 이미지 빌드 + 전체 배포
+# 5. Build Docker image + deploy everything
 cdk deploy --all
 
-# 6. 배포 후 출력값 확인
-# - 웹 UI URL (CloudFront)
+# 6. Check deployment outputs
+# - Web UI URL (CloudFront)
 # - WebSocket URL
 # - REST API URL
 ```
 
-### 10.2 업데이트
+### 10.2 Updates
 
 ```bash
 git pull
@@ -936,26 +936,26 @@ cdk deploy --all
 
 ---
 
-## 11. 모니터링
+## 11. Monitoring
 
-### CloudWatch 메트릭
+### CloudWatch Metrics
 
-| 메트릭 | 소스 | 목적 |
+| Metric | Source | Purpose |
 |--------|------|------|
-| Lambda 실행 시간/오류 | Lambda 자동 | Gateway 성능 |
-| Fargate CPU/메모리 | ECS 자동 | 컨테이너 리소스 |
-| DynamoDB 읽기/쓰기 | DynamoDB 자동 | 데이터 접근 패턴 |
-| WebSocket 연결 수 | 커스텀 메트릭 | 동시 접속 |
-| 컨테이너 시작/종료 횟수 | 커스텀 메트릭 | 사용 패턴 분석 |
-| Cold start 소요 시간 | 커스텀 메트릭 | UX 지표 |
+| Lambda execution time/errors | Lambda automatic | Gateway performance |
+| Fargate CPU/memory | ECS automatic | Container resources |
+| DynamoDB reads/writes | DynamoDB automatic | Data access patterns |
+| WebSocket connection count | Custom metric | Concurrent connections |
+| Container start/stop count | Custom metric | Usage pattern analysis |
+| Cold start duration | Custom metric | UX metric |
 
-### 로그 그룹
+### Log Groups
 
-| 로그 그룹 | 보존 기간 | 소스 |
+| Log Group | Retention | Source |
 |----------|----------|------|
-| `/serverless-openclaw/lambda/ws-connect` | 7일 | Lambda |
-| `/serverless-openclaw/lambda/ws-message` | 7일 | Lambda |
-| `/serverless-openclaw/lambda/telegram` | 7일 | Lambda |
-| `/serverless-openclaw/lambda/api` | 7일 | Lambda |
-| `/serverless-openclaw/lambda/watchdog` | 7일 | Lambda |
-| `/serverless-openclaw/fargate/openclaw` | 14일 | Fargate |
+| `/serverless-openclaw/lambda/ws-connect` | 7 days | Lambda |
+| `/serverless-openclaw/lambda/ws-message` | 7 days | Lambda |
+| `/serverless-openclaw/lambda/telegram` | 7 days | Lambda |
+| `/serverless-openclaw/lambda/api` | 7 days | Lambda |
+| `/serverless-openclaw/lambda/watchdog` | 7 days | Lambda |
+| `/serverless-openclaw/fargate/openclaw` | 14 days | Fargate |

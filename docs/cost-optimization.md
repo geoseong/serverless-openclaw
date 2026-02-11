@@ -1,214 +1,214 @@
-# 비용 최적화 분석
+# Cost Optimization Analysis
 
-## 요약
+## Summary
 
-Fargate Spot + API Gateway 조합으로 극한의 비용 최적화를 적용한 결과:
+Aggressive cost optimization applied using the Fargate Spot + API Gateway combination:
 
-| 구분 | 프리 티어 내 (12개월) | 프리 티어 만료 후 |
-|------|---------------------|-----------------|
-| **최적화 전** (Fargate On-Demand) | ~$3-5/월 | ~$5-10/월 |
-| **최적화 후** (Fargate Spot) | **~$0.10/월** | **~$1-2/월** |
-| **절감률** | ~97% | ~80% |
+| Category | Within Free Tier (12 months) | After Free Tier Expiration |
+|----------|------------------------------|---------------------------|
+| **Before Optimization** (Fargate On-Demand) | ~$3-5/month | ~$5-10/month |
+| **After Optimization** (Fargate Spot) | **~$0.10/month** | **~$1-2/month** |
+| **Savings Rate** | ~97% | ~80% |
 
 ---
 
-## 1. Fargate Spot vs On-Demand 비교
+## 1. Fargate Spot vs On-Demand Comparison
 
-### 가격 비교 (us-east-1)
+### Price Comparison (us-east-1)
 
-| 리소스 | On-Demand | Fargate Spot | 할인율 |
-|--------|-----------|-------------|--------|
-| vCPU | $0.04048/시간 | $0.01244/시간 | **~70%** |
-| Memory (GB) | $0.00445/시간 | $0.00137/시간 | **~70%** |
+| Resource | On-Demand | Fargate Spot | Discount Rate |
+|----------|-----------|-------------|---------------|
+| vCPU | $0.04048/hour | $0.01244/hour | **~70%** |
+| Memory (GB) | $0.00445/hour | $0.00137/hour | **~70%** |
 
-### 월간 비용 계산 (0.25 vCPU, 0.5GB, 하루 2시간)
+### Monthly Cost Calculation (0.25 vCPU, 0.5GB, 2 hours/day)
 
-**사용 시간**: 2시간/일 x 30일 = 60시간/월
+**Usage Hours**: 2 hours/day x 30 days = 60 hours/month
 
-| 항목 | On-Demand | Fargate Spot |
+| Item | On-Demand | Fargate Spot |
 |------|-----------|-------------|
 | vCPU (0.25) | $0.61 | **$0.19** |
 | Memory (0.5GB) | $0.13 | **$0.04** |
-| **소계** | **$0.74** | **$0.23** |
+| **Subtotal** | **$0.74** | **$0.23** |
 
-### Fargate Spot 주의사항
+### Fargate Spot Caveats
 
-- **2분 사전 경고**: AWS가 용량 회수 시 2분 전 통지
-- **SLA 없음**: 가용성 보장 없음
-- **중단 대응 필요**: Graceful shutdown 구현 필수
+- **2-minute advance warning**: AWS notifies 2 minutes before capacity reclamation
+- **No SLA**: No availability guarantee
+- **Interruption handling required**: Graceful shutdown implementation is mandatory
 
-### Spot 중단 대응 전략
+### Spot Interruption Response Strategy
 
-OpenClaw의 on-demand 특성상 Spot과 잘 맞음:
-1. **대화 상태 자동 저장**: DynamoDB에 실시간 상태 저장하여 중단 시에도 복구 가능
-2. **Graceful shutdown**: SIGTERM 수신 시 2분 내 현재 작업 완료 및 상태 저장
-3. **자동 재시작**: 중단 후 다음 요청 시 새 Spot 태스크 자동 기동
-4. **Fallback 불필요**: 개인용이므로 잠시 대기 후 재접속으로 충분
+OpenClaw's on-demand nature is a good fit for Spot:
+1. **Automatic conversation state saving**: Real-time state persistence to DynamoDB enables recovery after interruptions
+2. **Graceful shutdown**: Complete current work and save state within 2 minutes of receiving SIGTERM
+3. **Automatic restart**: New Spot task automatically starts on the next request after interruption
+4. **No fallback needed**: For personal use, a brief wait and reconnection is sufficient
 
 ---
 
-## 2. API Gateway vs ALB 비교
+## 2. API Gateway vs ALB Comparison
 
-### 가격 비교 (월 10,000 요청 + WebSocket 기준)
+### Price Comparison (10,000 requests/month + WebSocket)
 
-| 항목 | API Gateway | ALB |
+| Item | API Gateway | ALB |
 |------|-------------|-----|
-| 고정 비용 | $0 | ~$16-18 (시간당 $0.0225 x 730시간) |
-| 요청 비용 (REST 10K) | ~$0.035 | ~$0.08 (LCU) |
-| WebSocket | ~$0.01 (메시지 + 연결분) | LCU에 포함 |
-| 데이터 전송 | ~$0.01 | ~$0.01 |
-| **월 합계** | **~$0.05** | **~$18-25** |
-| **프리 티어** | 1M REST 요청 + 1M WebSocket 메시지 무료 | 프리 티어 없음 (WebSocket) |
+| Fixed cost | $0 | ~$16-18 ($0.0225/hour x 730 hours) |
+| Request cost (REST 10K) | ~$0.035 | ~$0.08 (LCU) |
+| WebSocket | ~$0.01 (messages + connection minutes) | Included in LCU |
+| Data transfer | ~$0.01 | ~$0.01 |
+| **Monthly total** | **~$0.05** | **~$18-25** |
+| **Free Tier** | 1M REST requests + 1M WebSocket messages free | No Free Tier (WebSocket) |
 
-### 결론
+### Conclusion
 
-개인 사용(저트래픽) 환경에서 API Gateway가 ALB 대비 **월 $18-25 절감**. 저트래픽에서는 API Gateway가 압도적으로 유리.
+For personal use (low-traffic) environments, API Gateway saves **~$18-25/month** compared to ALB. API Gateway is overwhelmingly advantageous at low traffic volumes.
 
 ---
 
-## 3. 서비스별 상세 비용 (최적화 후)
+## 3. Detailed Cost by Service (After Optimization)
 
-### 조건
-- 리전: us-east-1
-- Fargate Spot: 0.25 vCPU, 0.5GB, 하루 2시간 (퍼블릭 서브넷, Public IP 할당)
-- 월 10,000 요청, WebSocket 동시 접속 10개, 일 평균 30분 사용
-- DynamoDB: 월 100K 읽기/쓰기
-- NAT Gateway 없음 (Fargate Public IP로 직접 인터넷 접근)
-- VPC Gateway Endpoints: DynamoDB, S3 (무료)
-- S3: 1GB 이하
+### Assumptions
+- Region: us-east-1
+- Fargate Spot: 0.25 vCPU, 0.5GB, 2 hours/day (public subnet, Public IP assigned)
+- 10,000 requests/month, 10 concurrent WebSocket connections, average 30 minutes of daily use
+- DynamoDB: 100K reads/writes per month
+- No NAT Gateway (direct internet access via Fargate Public IP)
+- VPC Gateway Endpoints: DynamoDB, S3 (free)
+- S3: Under 1GB
 
-### 프리 티어 내 (가입 후 12개월)
+### Within Free Tier (First 12 Months After Signup)
 
-| 서비스 | 월 비용 | 비고 |
-|--------|--------|------|
-| ECS Fargate Spot | **$0.23** | Fargate는 별도 프리 티어 없음 |
-| API Gateway (WebSocket + REST) | $0.00 | 1M 요청 + 1M 메시지 프리 티어 |
-| DynamoDB | $0.00 | 25GB 스토리지 + 25 RCU/WCU 프리 티어 |
-| S3 | $0.00 | 5GB 프리 티어 |
-| CloudFront | $0.00 | 1TB 전송 + 10M 요청 프리 티어 |
-| Cognito | $0.00 | 50,000 MAU 무기한 무료 |
-| CloudWatch | $0.00 | 5GB 로그 수집 프리 티어 |
-| ECR | $0.00 | 500MB 스토리지 프리 티어 |
-| VPC (네트워크) | $0.00 | NAT Gateway 없음, VPC Gateway Endpoints 무료 |
-| **합계** | **~$0.23/월** | |
+| Service | Monthly Cost | Notes |
+|---------|-------------|-------|
+| ECS Fargate Spot | **$0.23** | Fargate has no separate Free Tier |
+| API Gateway (WebSocket + REST) | $0.00 | 1M requests + 1M messages Free Tier |
+| DynamoDB | $0.00 | 25GB storage + 25 RCU/WCU Free Tier |
+| S3 | $0.00 | 5GB Free Tier |
+| CloudFront | $0.00 | 1TB transfer + 10M requests Free Tier |
+| Cognito | $0.00 | 50,000 MAU always free |
+| CloudWatch | $0.00 | 5GB log ingestion Free Tier |
+| ECR | $0.00 | 500MB storage Free Tier |
+| VPC (Network) | $0.00 | No NAT Gateway, VPC Gateway Endpoints are free |
+| **Total** | **~$0.23/month** | |
 
-### 프리 티어 만료 후
+### After Free Tier Expiration
 
-| 서비스 | 월 비용 | 산출 근거 |
-|--------|--------|----------|
+| Service | Monthly Cost | Calculation Basis |
+|---------|-------------|-------------------|
 | ECS Fargate Spot | **$0.23** | vCPU: 0.25 x $0.01244 x 60h = $0.19, Mem: 0.5 x $0.00137 x 60h = $0.04 |
-| API Gateway REST | $0.04 | 10K 요청 x $3.50/1M = $0.035 |
-| API Gateway WebSocket | $0.01 | 10K 메시지 + ~13,500 연결분 = ~$0.01 |
-| DynamoDB | $0.16 | 100K 읽기($0.025) + 100K 쓰기($0.125) + 1GB 스토리지($0.01) |
-| S3 | $0.03 | 1GB x $0.023 + 요청 비용 |
-| CloudFront | $0.09 | 1GB 전송($0.085) + 10K 요청($0.01) |
-| Cognito | $0.00 | 50,000 MAU 무기한 무료 |
-| CloudWatch | $0.50 | 1GB 로그 수집($0.50) |
-| ECR | $0.01 | ~100MB Docker 이미지 |
-| VPC (네트워크) | $0.00 | NAT Gateway 없음, VPC Gateway Endpoints 무료 |
-| **합계** | **~$1.07/월** | |
+| API Gateway REST | $0.04 | 10K requests x $3.50/1M = $0.035 |
+| API Gateway WebSocket | $0.01 | 10K messages + ~13,500 connection minutes = ~$0.01 |
+| DynamoDB | $0.16 | 100K reads($0.025) + 100K writes($0.125) + 1GB storage($0.01) |
+| S3 | $0.03 | 1GB x $0.023 + request costs |
+| CloudFront | $0.09 | 1GB transfer($0.085) + 10K requests($0.01) |
+| Cognito | $0.00 | 50,000 MAU always free |
+| CloudWatch | $0.50 | 1GB log ingestion($0.50) |
+| ECR | $0.01 | ~100MB Docker image |
+| VPC (Network) | $0.00 | No NAT Gateway, VPC Gateway Endpoints are free |
+| **Total** | **~$1.07/month** | |
 
 ---
 
-## 4. On-Demand 대비 최적화 효과 요약
+## 4. Optimization Savings Summary vs On-Demand
 
 ```
-최적화 전 (Fargate On-Demand + ALB 가정):
-  Fargate On-Demand:  $0.74/월
-  ALB:               $18.00/월
-  기타:               $1.00/월
-  합계:              ~$19.74/월
+Before Optimization (assuming Fargate On-Demand + ALB):
+  Fargate On-Demand:  $0.74/month
+  ALB:               $18.00/month
+  Other:              $1.00/month
+  Total:             ~$19.74/month
 
-최적화 후 (Fargate Spot + API Gateway):
-  Fargate Spot:       $0.23/월
-  API Gateway:        $0.05/월
-  기타:               $0.79/월
-  합계:              ~$1.07/월
+After Optimization (Fargate Spot + API Gateway):
+  Fargate Spot:       $0.23/month
+  API Gateway:        $0.05/month
+  Other:              $0.79/month
+  Total:             ~$1.07/month
 
-절감액: ~$18.67/월 (~95% 절감)
+Savings: ~$18.67/month (~95% reduction)
 ```
 
 ---
 
-## 5. 네트워크 비용 최적화: NAT Gateway 제거
+## 5. Network Cost Optimization: Eliminating NAT Gateway
 
-NAT Gateway는 비활성 시에도 고정 비용이 발생하여, 저트래픽 개인 사용 환경에서 가장 큰 비용 요인이 된다.
+NAT Gateway incurs fixed costs even when idle, making it the largest cost driver in low-traffic personal use environments.
 
-| 구성 | 월 고정 비용 | 데이터 처리 | 비고 |
-|------|------------|-----------|------|
-| NAT Gateway (단일 AZ) | ~$4.50 | $0.045/GB | 최소 월 ~$33 (일반적 사용 패턴) |
-| NAT Instance (fck-nat) | ~$3.00 | 인스턴스에 포함 | 관리 부담 증가 |
-| **Fargate Public IP** | **$0** | **$0** | **채택** |
+| Configuration | Monthly Fixed Cost | Data Processing | Notes |
+|---------------|-------------------|-----------------|-------|
+| NAT Gateway (single AZ) | ~$4.50 | $0.045/GB | Minimum ~$33/month (typical usage pattern) |
+| NAT Instance (fck-nat) | ~$3.00 | Included in instance | Increased management overhead |
+| **Fargate Public IP** | **$0** | **$0** | **Adopted** |
 
-**채택한 방식**: Fargate를 퍼블릭 서브넷에 배치하고 Public IP를 할당하여 인터넷에 직접 접근. NAT Gateway를 완전히 제거한다.
+**Adopted Approach**: Place Fargate in a public subnet and assign a Public IP for direct internet access. NAT Gateway is completely eliminated.
 
-- VPC Gateway Endpoints (DynamoDB, S3): 무료. AWS 서비스 트래픽을 내부 네트워크로 유지
-- Interface Endpoints (ECR, CloudWatch 등): 미사용. 월 ~$7/개로 비용 목표 초과. Fargate Public IP로 공개 endpoint 접근
-- Lambda: VPC 외부 배치. 공개 AWS API endpoint 사용
+- VPC Gateway Endpoints (DynamoDB, S3): Free. Keeps AWS service traffic on the internal network
+- Interface Endpoints (ECR, CloudWatch, etc.): Not used. At ~$7/month each, they exceed cost targets. Fargate Public IP accesses public endpoints instead
+- Lambda: Deployed outside VPC. Uses public AWS API endpoints
 
-> **트레이드오프**: Bridge 서버(`:8080`)가 인터넷에 노출되므로, 공유 시크릿 토큰 기반 인증이 필수. Security Group만으로는 Lambda의 가변 IP를 특정할 수 없다.
-
----
-
-## 6. 추가 비용 최적화 옵션
-
-| 전략 | 절감 효과 | 트레이드오프 |
-|------|----------|------------|
-| **Fargate 스펙 축소** (0.25 vCPU, 0.5GB → 최소치 유지) | 이미 최소 스펙 적용 | OpenClaw 성능 제한 가능 |
-| **비활성 타임아웃 단축** (15분 → 5분) | 컨테이너 실행 시간 ~30% 감소 | Cold start 빈도 증가 |
-| **CloudWatch 로그 보존 기간 단축** | 로그 스토리지 비용 절감 | 디버깅 이력 제한 |
-| **S3 Intelligent-Tiering** | 비활성 데이터 자동 비용 절감 | 1GB 이하에서는 효과 미미 |
-| **Compute Savings Plans** (1년 약정) | Fargate 추가 50% 할인 | 장기 약정 필요 |
+> **Tradeoff**: The Bridge server (`:8080`) is exposed to the internet, so shared secret token-based authentication is mandatory. Security Groups alone cannot identify Lambda's variable IP addresses.
 
 ---
 
-## 7. 검토했지만 채택하지 않은 대안: Lambda 컨테이너
+## 6. Additional Cost Optimization Options
 
-ECS Fargate Spot 대신 컨테이너 기반 Lambda를 사용하는 방안을 검토했으나, OpenClaw의 특성상 적합하지 않아 채택하지 않았다.
+| Strategy | Savings Impact | Tradeoff |
+|----------|---------------|----------|
+| **Reduce Fargate specs** (0.25 vCPU, 0.5GB -> maintain minimum) | Already at minimum specs | May limit OpenClaw performance |
+| **Shorten inactivity timeout** (15 min -> 5 min) | ~30% reduction in container runtime | Increased cold start frequency |
+| **Shorten CloudWatch log retention period** | Log storage cost savings | Limited debugging history |
+| **S3 Intelligent-Tiering** | Automatic cost reduction for inactive data | Negligible impact under 1GB |
+| **Compute Savings Plans** (1-year commitment) | Additional 50% discount on Fargate | Long-term commitment required |
 
-### Lambda 컨테이너 이미지 주요 제약
+---
 
-| 항목 | Lambda 컨테이너 | Fargate Spot |
-|------|----------------|-------------|
-| 최대 실행 시간 | **15분 (하드 리밋)** | 무제한 |
-| 최대 이미지 크기 | 10GB | 무제한 |
-| 최대 메모리 | 10,240MB | 설정 가능 |
-| WebSocket 지원 | 불가 (상태 비유지) | 네이티브 지원 |
-| 상시 프로세스 | 불가 (요청당 1회 실행) | 가능 |
-| Cold start | ~1초 (캐시 후) | ~30초-1분 |
+## 7. Alternative Reviewed but Not Adopted: Lambda Containers
 
-### 비용 비교 (하루 2시간 연속 실행)
+Using container-based Lambda instead of ECS Fargate Spot was evaluated but not adopted due to incompatibility with OpenClaw's characteristics.
 
-| 항목 | Lambda 컨테이너 | Fargate Spot |
-|------|----------------|-------------|
-| 컴퓨팅 비용 | ~$3.60 (216K GB-seconds x $0.0000167) | **~$0.23** |
-| 요청 비용 | ~$1.62 (프리 티어 초과 시) | $0 |
-| **월 합계** | **~$5.22** | **~$0.23** |
+### Lambda Container Image Key Limitations
 
-Fargate Spot이 **22배 더 저렴** 하다.
+| Item | Lambda Container | Fargate Spot |
+|------|-----------------|-------------|
+| Maximum execution time | **15 minutes (hard limit)** | Unlimited |
+| Maximum image size | 10GB | Unlimited |
+| Maximum memory | 10,240MB | Configurable |
+| WebSocket support | Not possible (stateless) | Native support |
+| Persistent process | Not possible (single execution per request) | Possible |
+| Cold start | ~1 second (after caching) | ~30s-1min |
 
-### 채택하지 않은 이유
+### Cost Comparison (2 hours of continuous execution per day)
 
-1. **15분 타임아웃**: OpenClaw는 장기 실행 에이전트. 대화 세션, 브라우저 자동화, 복잡한 태스크가 15분을 초과할 수 있음
-2. **WebSocket 미지원**: Lambda는 persistent connection을 유지할 수 없음. Lambda Web Adapter도 HTTP 요청 단위로만 동작하며 WebSocket 불가
-3. **비용이 오히려 더 높음**: 장시간 연속 실행 시 GB-second 과금이 Fargate Spot보다 비쌈
-4. **상시 프로세스 불가**: Lambda는 요청당 격리 실행. OpenClaw의 인메모리 상태(스킬 로딩, 대화 컨텍스트)를 매 요청마다 재구성해야 함
+| Item | Lambda Container | Fargate Spot |
+|------|-----------------|-------------|
+| Compute cost | ~$3.60 (216K GB-seconds x $0.0000167) | **~$0.23** |
+| Request cost | ~$1.62 (after Free Tier exhaustion) | $0 |
+| **Monthly total** | **~$5.22** | **~$0.23** |
 
-### 하이브리드 접근도 검토
+Fargate Spot is **22x cheaper**.
 
-단순 채팅은 Lambda(즉시 응답), 장기 태스크는 Fargate로 라우팅하는 하이브리드 방식도 검토했으나:
-- 추가 구현 복잡도(라우팅 로직, 상태 직렬화, 두 런타임 관리) 대비 절감 효과가 미미 ($0.23/월 이하)
-- 요청이 15분 이상 걸릴지 사전 예측이 어려운 경우 존재
-- **결론**: 구현 복잡도 대비 비용/UX 이점이 불충분하여 Fargate Spot 단독 구조 유지
+### Reasons for Not Adopting
 
-### Lambda가 적합한 역할
+1. **15-minute timeout**: OpenClaw is a long-running agent. Conversation sessions, browser automation, and complex tasks can exceed 15 minutes
+2. **No WebSocket support**: Lambda cannot maintain persistent connections. Lambda Web Adapter also only operates on a per-HTTP-request basis and does not support WebSocket
+3. **Actually more expensive**: For long continuous execution, GB-second billing is more expensive than Fargate Spot
+4. **No persistent processes**: Lambda runs in per-request isolation. OpenClaw's in-memory state (skill loading, conversation context) would need to be reconstructed with every request
 
-현재 아키텍처에서 Lambda는 **Gateway 역할** (인증, 라우팅, 컨테이너 관리)로 활용 중이며, 이 용도에는 최적이다:
-- 짧은 실행 시간 (수백 ms)
-- 이벤트 기반 처리
-- 프리 티어 내 무료 운영
+### Hybrid Approach Also Evaluated
 
-### 참고 자료
+A hybrid approach routing simple chats to Lambda (instant response) and long-running tasks to Fargate was also evaluated, but:
+- The savings are negligible ($0.23/month or less) relative to the additional implementation complexity (routing logic, state serialization, managing two runtimes)
+- Some requests are unpredictable in whether they will exceed 15 minutes
+- **Conclusion**: Insufficient cost/UX benefit relative to implementation complexity; maintaining Fargate Spot as the sole runtime
+
+### Where Lambda Is Appropriate
+
+In the current architecture, Lambda is used in the **Gateway role** (authentication, routing, container management), which is an optimal fit:
+- Short execution times (hundreds of ms)
+- Event-driven processing
+- Free operation within the Free Tier
+
+### References
 
 - [AWS Lambda Container Image Support](https://aws.amazon.com/blogs/aws/new-for-aws-lambda-container-image-support/)
 - [Lambda Container Images Documentation](https://docs.aws.amazon.com/lambda/latest/dg/images-create.html)
@@ -218,7 +218,7 @@ Fargate Spot이 **22배 더 저렴** 하다.
 
 ---
 
-## 참고 자료
+## References
 
 - [AWS Fargate Pricing](https://aws.amazon.com/fargate/pricing/)
 - [Fargate Spot vs On-Demand - CloudZero](https://www.cloudzero.com/blog/fargate-cost/)

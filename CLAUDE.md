@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Serverless OpenClaw — AWS 서버리스 인프라에서 OpenClaw AI 에이전트를 on-demand로 구동. 웹 UI + Telegram 인터페이스. 비용 목표 ~$1/월.
+Serverless OpenClaw — Runs the OpenClaw AI agent on-demand on AWS serverless infrastructure. Web UI + Telegram interface. Cost target ~$1/month.
 
 ## Build & Dev Commands
 
@@ -12,48 +12,48 @@ Serverless OpenClaw — AWS 서버리스 인프라에서 OpenClaw AI 에이전�
 npm run build          # tsc --build (all packages via project references)
 npm run lint           # eslint "packages/**/*.ts"
 npm run format         # prettier
-npm run test           # vitest run (단위 테스트)
-npm run test:e2e       # vitest e2e (E2E 테스트)
+npm run test           # vitest run (unit tests)
+npm run test:e2e       # vitest e2e (E2E tests)
 
 # CDK
-cd packages/cdk && npx cdk synth       # CloudFormation 생성
-cd packages/cdk && npx cdk deploy      # AWS 배포
+cd packages/cdk && npx cdk synth       # Generate CloudFormation
+cd packages/cdk && npx cdk deploy      # Deploy to AWS
 ```
 
-**Git Hooks** (husky): pre-commit → build + lint + UT, pre-push → E2E 테스트
+**Git Hooks** (husky): pre-commit -> build + lint + UT, pre-push -> E2E tests
 
-TypeScript: ES2022, Node16 module resolution, strict, composite builds. import 경로에 `.js` 확장자 필수.
+TypeScript: ES2022, Node16 module resolution, strict, composite builds. `.js` extension required in import paths.
 
 ## Architecture
 
 ```
 packages/
-├── shared/      # 타입 + 상수 (TABLE_NAMES, BRIDGE_PORT, 키 프리픽스)
-├── cdk/         # CDK 스택 (lib/stacks/)
-├── gateway/     # Lambda 핸들러 6개 (ws-connect/message/disconnect, telegram-webhook, api-handler, watchdog)
-├── container/   # Fargate 컨테이너 (Bridge 서버 + OpenClaw JSON-RPC 클라이언트)
+├── shared/      # Types + constants (TABLE_NAMES, BRIDGE_PORT, key prefixes)
+├── cdk/         # CDK stacks (lib/stacks/)
+├── gateway/     # 6 Lambda handlers (ws-connect/message/disconnect, telegram-webhook, api-handler, watchdog)
+├── container/   # Fargate container (Bridge server + OpenClaw JSON-RPC client)
 └── web/         # React SPA (Vite)
 ```
 
-**데이터 흐름:** 클라이언트 → API Gateway (WS/REST) → Lambda → Bridge(:8080 HTTP) → OpenClaw Gateway(:18789 WS, JSON-RPC 2.0)
+**Data Flow:** Client -> API Gateway (WS/REST) -> Lambda -> Bridge(:8080 HTTP) -> OpenClaw Gateway(:18789 WS, JSON-RPC 2.0)
 
-**CDK 스택:** NetworkStack → StorageStack → {ApiStack, AuthStack, ComputeStack} → WebStack
+**CDK Stacks:** NetworkStack -> StorageStack -> {ApiStack, AuthStack, ComputeStack} -> WebStack
 
 ## Critical Constraints
 
-이 규칙을 위반하면 비용 폭증 또는 보안 사고 발생:
+Violating these rules will cause cost spikes or security incidents:
 
-- **NAT Gateway 금지** — `natGateways: 0` 필수. Fargate Public IP + VPC Gateway Endpoints 사용
-- **ALB, Interface Endpoints 금지** — API Gateway만 사용
-- **DynamoDB PAY_PER_REQUEST** — 프로비저닝 모드 금지
-- **시크릿 디스크 미기록** — API 키/토큰은 환경변수(Secrets Manager)로만 전달, `openclaw.json`에 미포함
-- **Telegram webhook-only** — long polling 사용 금지 (API가 동시 사용 거부)
-- **Bridge Bearer 토큰 필수** — `/health` 외 모든 엔드포인트
-- **userId 서버사이드만** — 클라이언트 제공 userId 금지 (IDOR 방지)
-- **RunTask에 `launchType` 금지** — `capacityProviderStrategy`만 사용 (동시 지정 불가)
-- **S3 버킷명 하드코딩 금지** — CDK 자동 생성 (글로벌 유일성)
+- **No NAT Gateway** — `natGateways: 0` required. Use Fargate Public IP + VPC Gateway Endpoints
+- **No ALB, no Interface Endpoints** — Use API Gateway only
+- **DynamoDB PAY_PER_REQUEST** — Provisioned mode prohibited
+- **No secrets written to disk** — API keys/tokens delivered only via environment variables (Secrets Manager), not included in `openclaw.json`
+- **Telegram webhook-only** — Long polling prohibited (API rejects simultaneous use)
+- **Bridge Bearer token required** — For all endpoints except `/health`
+- **Server-side userId only** — Client-provided userId prohibited (IDOR prevention)
+- **No `launchType` in RunTask** — Use `capacityProviderStrategy` only (cannot be specified simultaneously)
+- **No hardcoded S3 bucket names** — CDK auto-generates them (global uniqueness)
 
-## DynamoDB Tables (5개)
+## DynamoDB Tables (5)
 
 | Table | PK | SK | TTL | GSI |
 |-------|----|----|-----|-----|
@@ -63,36 +63,36 @@ packages/
 | Connections | `CONN#{connId}` | — | `ttl` | `userId-index` |
 | PendingMessages | `USER#{userId}` | `MSG#{ts}#{uuid}` | `ttl` | — |
 
-테이블명은 `@serverless-openclaw/shared`의 `TABLE_NAMES` 상수 사용.
+Table names use the `TABLE_NAMES` constant from `@serverless-openclaw/shared`.
 
 ## Development Rules
 
-- **TDD 필수** — UI(web 패키지)를 제외한 모든 구현은 테스트를 먼저 작성한 후 구현한다
+- **TDD required** — For all implementations except the UI (web package), write tests first before implementing
 - **Git Hooks:**
-  - `pre-commit`: 단위 테스트(vitest) + lint(eslint) 통과 필수
-  - `pre-push`: E2E 테스트 통과 필수
-- **E2E 테스트 배포:**
-  - 로컬: AWS 프로필 정보는 `.env` 파일로 관리 (`.gitignore`에 포함)
-  - CI: GitHub Actions + OIDC 인증 연동으로 AWS 배포
+  - `pre-commit`: Must pass unit tests (vitest) + lint (eslint)
+  - `pre-push`: Must pass E2E tests
+- **E2E Test Deployment:**
+  - Local: AWS profile information managed via `.env` file (included in `.gitignore`)
+  - CI: AWS deployment via GitHub Actions + OIDC authentication
 
 ## Key Design Patterns
 
-- **Cold Start 메시지 큐잉:** 컨테이너 기동 중 메시지 → PendingMessages DDB 저장 → Bridge 시작 후 소비 (5분 TTL)
-- **Bridge 6계층 방어:** Security Group → Bearer 토큰 → TLS → localhost 바인딩 → non-root → Secrets Manager
-- **Fargate Public IP 조회:** DescribeTasks → ENI ID → DescribeNetworkInterfaces → PublicIp
-- **OpenClaw 프로토콜:** JSON-RPC 2.0 / MCP over WebSocket, `?token=` 쿼리 인증
+- **Cold Start Message Queuing:** Messages during container startup -> stored in PendingMessages DDB -> consumed after Bridge starts (5-minute TTL)
+- **Bridge 6-Layer Defense:** Security Group -> Bearer token -> TLS -> localhost binding -> non-root -> Secrets Manager
+- **Fargate Public IP Lookup:** DescribeTasks -> ENI ID -> DescribeNetworkInterfaces -> PublicIp
+- **OpenClaw Protocol:** JSON-RPC 2.0 / MCP over WebSocket, `?token=` query authentication
 
-## Phase 1 Progress (10/10 — 완료)
+## Phase 1 Progress (10/10 — Complete)
 
-완료: 1-1(프로젝트 초기화), 1-2(NetworkStack + StorageStack), 1-3(컨테이너), 1-4(Gateway Lambda), 1-5(API Gateway), 1-6(Cognito), 1-7(Compute), 1-8(웹 UI), 1-9(Telegram), 1-10(통합 테스트/문서화)
+Completed: 1-1 (Project init), 1-2 (NetworkStack + StorageStack), 1-3 (Container), 1-4 (Gateway Lambda), 1-5 (API Gateway), 1-6 (Cognito), 1-7 (Compute), 1-8 (Web UI), 1-9 (Telegram), 1-10 (Integration tests/documentation)
 
-상세: `docs/progress.md` 참조. 구현 가이드: `/implement 1-{N}` 스킬 사용.
+Details: See `docs/progress.md`. Implementation guide: Use `/implement 1-{N}` skill.
 
 ## Reference Docs
 
-- `docs/architecture.md` — 네트워크, CDK, DynamoDB 스키마, 보안 모델
-- `docs/implementation-plan.md` — Bridge 프로토콜, 컨테이너 플로우, Telegram 전략
-- `docs/cost-optimization.md` — Fargate Spot, API Gateway vs ALB 분석
-- `docs/PRD.md` — 제품 요구사항
-- `docs/deployment.md` — AWS 배포 가이드 (시크릿, 빌드, 배포, 검증)
-- `docs/development.md` — 로컬 개발 가이드 (환경, TDD, 코딩 규칙)
+- `docs/architecture.md` — Network, CDK, DynamoDB schema, security model
+- `docs/implementation-plan.md` — Bridge protocol, container flow, Telegram strategy
+- `docs/cost-optimization.md` — Fargate Spot, API Gateway vs ALB analysis
+- `docs/PRD.md` — Product requirements
+- `docs/deployment.md` — AWS deployment guide (secrets, build, deploy, verification)
+- `docs/development.md` — Local development guide (environment, TDD, coding rules)

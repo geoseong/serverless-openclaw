@@ -1,45 +1,45 @@
-# 세부 설계 및 구현 계획
+# Detailed Design and Implementation Plan
 
-MoltWorker 참조 분석을 기반으로 한 구현 수준의 상세 설계와 단계별 구현 계획.
+Detailed implementation-level design and step-by-step implementation plan based on MoltWorker reference analysis.
 
 ---
 
-## Part 1: MoltWorker 참조 분석 및 설계 결정
+## Part 1: MoltWorker Reference Analysis and Design Decisions
 
-### 1.1 MoltWorker 아키텍처 요약
+### 1.1 MoltWorker Architecture Summary
 
-MoltWorker는 Cloudflare Worker + Sandbox에서 OpenClaw를 구동하는 프로젝트로, 다음과 같은 구조를 가진다:
+MoltWorker is a project that runs OpenClaw on Cloudflare Worker + Sandbox, with the following structure:
 
 ```
 Browser → CF Worker (Hono) → CF Sandbox Container → OpenClaw Gateway (:18789)
 ```
 
-| 컴포넌트 | 역할 |
-|----------|------|
-| CF Worker (`src/index.ts`) | 프록시, 인증, 컨테이너 생명주기 관리 |
-| Sandbox Container | OpenClaw 런타임 (Docker) |
-| `start-openclaw.sh` | 컨테이너 시작 스크립트: R2 복원 → onboard → config 패치 → gateway 시작 |
-| Admin UI (`src/client/`) | React SPA로 디바이스 관리, 스토리지 상태, 게이트웨이 재시작 |
-| R2 Storage | rsync 5분 주기 백업/복원으로 데이터 영속성 제공 |
+| Component | Role |
+|-----------|------|
+| CF Worker (`src/index.ts`) | Proxy, authentication, container lifecycle management |
+| Sandbox Container | OpenClaw runtime (Docker) |
+| `start-openclaw.sh` | Container startup script: R2 restore → onboard → config patch → gateway start |
+| Admin UI (`src/client/`) | React SPA for device management, storage status, gateway restart |
+| R2 Storage | Data persistence via rsync backup/restore every 5 minutes |
 
-### 1.2 MoltWorker에서 참조할 핵심 패턴
+### 1.2 Key Patterns to Reference from MoltWorker
 
-| 패턴 | MoltWorker 구현 | 우리 프로젝트 적용 |
-|------|----------------|-------------------|
-| **컨테이너 시작 스크립트** | `start-openclaw.sh`: 백업 복원 → onboard → config 패치 → gateway 시작 | S3 복원 → onboard → config 패치 → Bridge + Gateway 시작 |
-| **OpenClaw Gateway 직접 사용** | Worker가 Gateway(:18789)로 HTTP/WS 프록시 | Bridge 서버가 Gateway에 로컬 WebSocket으로 연결 |
-| **Config 패치** | Node.js inline 스크립트로 `openclaw.json` 동적 수정 | 동일 패턴 (채널, 인증, 모델 설정) |
-| **Cold start UX** | 로딩 HTML 페이지 즉시 반환 + 백그라운드 시작 | WebSocket으로 "에이전트를 깨우는 중..." 상태 메시지 |
-| **데이터 영속성** | R2 rsync 5분 주기 | S3 백업 + DynamoDB 실시간 저장 |
-| **생명주기 관리** | `ensureMoltbotGateway()`: 프로세스 탐색 → 포트 대기 → 실패 시 kill/재시작 | Lambda watchdog + DynamoDB TaskState |
+| Pattern | MoltWorker Implementation | Our Project Adaptation |
+|---------|---------------------------|------------------------|
+| **Container startup script** | `start-openclaw.sh`: backup restore → onboard → config patch → gateway start | S3 restore → onboard → config patch → Bridge + Gateway start |
+| **Direct OpenClaw Gateway usage** | Worker proxies HTTP/WS to Gateway(:18789) | Bridge server connects to Gateway via local WebSocket |
+| **Config patching** | Node.js inline script dynamically modifies `openclaw.json` | Same pattern (channel, auth, model settings) |
+| **Cold start UX** | Returns loading HTML page immediately + background start | WebSocket sends "Waking up agent..." status message |
+| **Data persistence** | R2 rsync every 5 minutes | S3 backup + DynamoDB real-time storage |
+| **Lifecycle management** | `ensureMoltbotGateway()`: process discovery → port wait → kill/restart on failure | Lambda watchdog + DynamoDB TaskState |
 
-### 1.3 핵심 설계 결정
+### 1.3 Key Design Decisions
 
-#### 결정 1: Bridge 서버 필요성
+#### Decision 1: Need for a Bridge Server
 
-MoltWorker는 CF Worker가 WebSocket을 직접 프록시할 수 있어 별도 Bridge가 불필요하다. 하지만 AWS Lambda는 ephemeral(최대 30초)이므로 persistent WebSocket 연결을 유지할 수 없다.
+MoltWorker can directly proxy WebSocket from CF Worker, so a separate Bridge is unnecessary. However, AWS Lambda is ephemeral (max 30 seconds) and cannot maintain persistent WebSocket connections.
 
-**결정**: Bridge 서버를 컨테이너 내에 구현하여 Lambda(HTTP) ↔ OpenClaw Gateway(WebSocket) 간 프로토콜 변환을 수행한다.
+**Decision**: Implement a Bridge server inside the container to perform protocol translation between Lambda (HTTP) and OpenClaw Gateway (WebSocket).
 
 ```
 Lambda --HTTP POST--> Bridge(:8080) --local WS--> OpenClaw Gateway(:18789)
@@ -47,83 +47,83 @@ Lambda --HTTP POST--> Bridge(:8080) --local WS--> OpenClaw Gateway(:18789)
 Bridge --@connections POST--> API Gateway WS --> Client
 ```
 
-#### 결정 2: Lambda VPC 배치 및 네트워크 설계
+#### Decision 2: Lambda VPC Placement and Network Design
 
-NAT Gateway는 단일 AZ 최소 구성에서도 월 ~$33(고정 $4.5 + 데이터 처리 비용)이 발생하며, 이는 전체 비용 목표($1/월)를 30배 이상 초과한다.
+NAT Gateway costs ~$33/month even in a minimal single-AZ configuration ($4.5 fixed + data processing costs), which exceeds the total cost target ($1/month) by over 30x.
 
-**결정**: NAT Gateway를 제거하고 다음 구조를 채택한다.
+**Decision**: Remove NAT Gateway and adopt the following architecture.
 
-| 컴포넌트 | 배치 | 이유 |
+| Component | Placement | Reason |
+|-----------|-----------|--------|
+| Fargate | Public subnet + Public IP assigned | Direct internet access (LLM API, Telegram, etc.). No NAT Gateway needed |
+| Lambda | Outside VPC | Uses public AWS endpoints such as ECS API, API Gateway Management API. No VPC placement needed |
+| VPC Gateway Endpoints | DynamoDB, S3 (free) | Keeps Fargate's AWS service traffic on the AWS internal network |
+
+- Lambda → Fargate communication: Obtain public IP via `DescribeTasks` → HTTP request to Bridge server (`:8080`)
+- Bridge server authentication: Shared secret token to block unauthorized access (Security Group alone cannot identify Lambda's variable IPs)
+- No private subnets needed → Simplified VPC structure
+
+#### Decision 3: Telegram Integration Strategy
+
+| Approach | Pros | Cons |
 |----------|------|------|
-| Fargate | 퍼블릭 서브넷 + Public IP 할당 | 직접 인터넷 접근 (LLM API, Telegram 등). NAT Gateway 불필요 |
-| Lambda | VPC 외부 | ECS API, API Gateway Management API 등 공개 AWS endpoint 사용. VPC 배치 불필요 |
-| VPC Gateway Endpoints | DynamoDB, S3 (무료) | Fargate의 AWS 서비스 트래픽을 AWS 내부 네트워크로 유지 |
+| **A. Webhook-only (via Lambda)** | Always responsive, single path | Requires message forwarding logic to Bridge |
+| **B. OpenClaw native (long polling)** | Simple, leverages built-in features | Messages lost when container is down |
+| ~~C. Hybrid~~ | ~~Always responsive + native~~ | **Not possible due to Telegram API restriction** |
 
-- Lambda → Fargate 통신: `DescribeTasks`로 퍼블릭 IP 확인 → Bridge 서버(`:8080`)에 HTTP 요청
-- Bridge 서버 인증: 공유 시크릿 토큰으로 무단 접근 차단 (Security Group만으로는 Lambda의 가변 IP를 특정할 수 없으므로)
-- 프라이빗 서브넷 불필요 → VPC 구조 단순화
+**Decision**: **Approach A (Webhook-only)**
 
-#### 결정 3: Telegram 통합 전략
+> **Why Approach C is not possible**: Telegram Bot API rejects `getUpdates` (long polling) calls when a webhook is set. The two approaches are mutually exclusive and cannot be used simultaneously.
 
-| 방식 | 장점 | 단점 |
-|------|------|------|
-| **A. Webhook-only (Lambda 경유)** | 항상 응답 가능, 단일 경로 | Bridge에 메시지 전달 로직 필요 |
-| **B. OpenClaw 네이티브 (long polling)** | 단순, 내장 기능 활용 | 컨테이너 다운 시 메시지 유실 |
-| ~~C. 하이브리드~~ | ~~항상 응답 + 네이티브~~ | **Telegram API 제약으로 불가** |
-
-**결정**: **방식 A (Webhook-only)**
-
-> **방식 C가 불가능한 이유**: Telegram Bot API는 webhook이 설정된 상태에서 `getUpdates` (long polling) 호출을 거부한다. 두 방식은 상호 배타적이므로 동시 사용이 불가능하다.
-
-- Telegram webhook → Lambda: **모든 메시지**를 Lambda가 수신
-- 컨테이너 미실행 시: "깨우는 중..." 응답 + 컨테이너 시작 + DynamoDB에 메시지 큐잉
-- 컨테이너 실행 중: Lambda → Bridge로 메시지 전달 (HTTP POST)
-- OpenClaw config에서 Telegram 채널 비활성화 (long polling 방지):
+- Telegram webhook → Lambda: Lambda receives **all messages**
+- When container is not running: "Waking up..." response + start container + queue message in DynamoDB
+- When container is running: Lambda → forwards message to Bridge (HTTP POST)
+- Disable Telegram channel in OpenClaw config (to prevent long polling):
   ```typescript
-  // patch-config.ts에서 Telegram 채널 제거
+  // Remove Telegram channel in patch-config.ts
   delete config.channels?.telegram;
   ```
-- 장점: 단일 메시지 경로로 디버깅 용이, 컨테이너 다운 시에도 메시지 수신 가능
+- Advantages: Single message path for easier debugging, messages can be received even when container is down
 
-#### 결정 4: 데이터 영속성 전략
+#### Decision 4: Data Persistence Strategy
 
-MoltWorker는 R2에 rsync 5분 주기 백업만 사용. 우리는 DynamoDB + S3 이중 구조:
+MoltWorker uses only R2 rsync backup every 5 minutes. We use a dual DynamoDB + S3 structure:
 
-| 데이터 | 저장소 | 이유 |
-|--------|-------|------|
-| 대화 이력 | DynamoDB | 실시간 쿼리 필요 (대화 목록, 검색) |
-| 사용자 설정 | DynamoDB | 빈번한 읽기/쓰기 |
-| 태스크 상태 | DynamoDB | Lambda/Bridge 양쪽에서 실시간 업데이트 |
-| OpenClaw 설정 파일 | S3 | 컨테이너 시작 시 복원 |
-| OpenClaw workspace | S3 | IDENTITY.md, MEMORY.md 등 에이전트 상태 |
-| Skills | S3 | 커스텀 skill 파일 |
+| Data | Storage | Reason |
+|------|---------|--------|
+| Conversation history | DynamoDB | Real-time queries needed (conversation list, search) |
+| User settings | DynamoDB | Frequent reads/writes |
+| Task state | DynamoDB | Real-time updates from both Lambda and Bridge |
+| OpenClaw config files | S3 | Restored on container startup |
+| OpenClaw workspace | S3 | Agent state such as IDENTITY.md, MEMORY.md |
+| Skills | S3 | Custom skill files |
 
 ---
 
-## Part 2: 세부 설계
+## Part 2: Detailed Design
 
-### 2.1 컨테이너 시작 흐름
+### 2.1 Container Startup Flow
 
-MoltWorker의 `start-openclaw.sh` 패턴을 참조하되, AWS 환경에 맞게 조정:
+References MoltWorker's `start-openclaw.sh` pattern, adapted for the AWS environment:
 
 ```mermaid
 graph TD
-    Start[컨테이너 시작] --> RestoreS3{S3 백업\n존재?}
-    RestoreS3 -->|예| Restore[S3에서 config/workspace 복원]
-    RestoreS3 -->|아니오| Fresh[신규 시작]
-    Restore --> CheckConfig{openclaw.json\n존재?}
+    Start[Container Start] --> RestoreS3{S3 Backup\nExists?}
+    RestoreS3 -->|Yes| Restore[Restore config/workspace from S3]
+    RestoreS3 -->|No| Fresh[Fresh Start]
+    Restore --> CheckConfig{openclaw.json\nExists?}
     Fresh --> CheckConfig
-    CheckConfig -->|아니오| Onboard["openclaw onboard\n--non-interactive"]
-    CheckConfig -->|예| Patch
-    Onboard --> Patch[Node.js로 config 패치\n채널/인증/모델 설정]
-    Patch --> StartBridge[Bridge 서버 시작\n:8080]
+    CheckConfig -->|No| Onboard["openclaw onboard\n--non-interactive"]
+    CheckConfig -->|Yes| Patch
+    Onboard --> Patch[Patch config with Node.js\nchannel/auth/model settings]
+    Patch --> StartBridge[Start Bridge Server\n:8080]
     StartBridge --> StartGW["openclaw gateway\n--port 18789 --bind localhost"]
-    StartGW --> Health[Bridge 헬스체크 대기]
+    StartGW --> Health[Wait for Bridge Health Check]
     Health --> UpdateDDB[DynamoDB TaskState\n→ Running]
-    UpdateDDB --> Ready[서비스 준비 완료]
+    UpdateDDB --> Ready[Service Ready]
 ```
 
-**시작 스크립트 (`start-openclaw.sh`) 설계:**
+**Startup script (`start-openclaw.sh`) design:**
 
 ```bash
 #!/bin/bash
@@ -135,7 +135,7 @@ WORKSPACE_DIR="/home/openclaw/clawd"
 S3_BUCKET="${S3_DATA_BUCKET}"
 
 # ============================================================
-# 1단계: S3에서 백업 복원
+# Step 1: Restore backup from S3
 # ============================================================
 if [ -n "$S3_BUCKET" ]; then
     echo "Checking S3 backup..."
@@ -145,12 +145,12 @@ if [ -n "$S3_BUCKET" ]; then
 fi
 
 # ============================================================
-# 2단계: Onboard (config 없을 때만)
+# Step 2: Onboard (only when config does not exist)
 # ============================================================
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "Running openclaw onboard..."
-    # --auth-choice env: API 키를 config에 기록하지 않고 환경 변수 참조
-    # (시크릿 디스크 미기록 원칙 — architecture.md 7.9 참조)
+    # --auth-choice env: Reference API key from environment variables, not written to config
+    # (No secrets on disk principle — see architecture.md 7.9)
     openclaw onboard --non-interactive --accept-risk \
         --mode local \
         --auth-choice env \
@@ -162,12 +162,12 @@ if [ ! -f "$CONFIG_FILE" ]; then
 fi
 
 # ============================================================
-# 3단계: Config 패치 (MoltWorker 패턴 참조)
+# Step 3: Config patching (references MoltWorker pattern)
 # ============================================================
 node /app/patch-config.js
 
 # ============================================================
-# 4단계: Bridge 서버 + Gateway 시작
+# Step 4: Start Bridge server + Gateway
 # ============================================================
 echo "Starting Bridge server..."
 node /app/bridge.js &
@@ -177,28 +177,28 @@ echo "Starting OpenClaw Gateway..."
 exec openclaw gateway --port 18789 --verbose --allow-unconfigured --bind localhost
 ```
 
-### 2.2 Bridge 서버 상세 설계
+### 2.2 Bridge Server Detailed Design
 
 ```
 packages/container/src/
-├── bridge.ts           # Express 서버 진입점
-├── openclaw-client.ts  # OpenClaw Gateway WebSocket 클라이언트
-├── callback.ts         # API Gateway @connections 콜백
-├── lifecycle.ts        # 생명주기 관리 (헬스체크, shutdown, S3 백업)
-├── patch-config.ts     # openclaw.json 패치 스크립트
-└── types.ts            # 타입 정의
+├── bridge.ts           # Express server entry point
+├── openclaw-client.ts  # OpenClaw Gateway WebSocket client
+├── callback.ts         # API Gateway @connections callback
+├── lifecycle.ts        # Lifecycle management (health check, shutdown, S3 backup)
+├── patch-config.ts     # openclaw.json patching script
+└── types.ts            # Type definitions
 ```
 
-#### Bridge 서버 핵심 로직
+#### Bridge Server Core Logic
 
 ```typescript
-// bridge.ts 의사 코드
+// bridge.ts pseudocode
 import express from "express";
 import { OpenClawClient } from "./openclaw-client";
 import { CallbackSender } from "./callback";
 import { LifecycleManager } from "./lifecycle";
 
-// TLS: 자체 서명 인증서로 HTTPS 서버 구동 (Bearer 토큰 스니핑 방지)
+// TLS: Run HTTPS server with self-signed certificate (prevent Bearer token sniffing)
 import https from "https";
 import { readFileSync } from "fs";
 
@@ -207,11 +207,11 @@ const ocClient = new OpenClawClient("ws://localhost:18789");
 const callback = new CallbackSender(process.env.WEBSOCKET_CALLBACK_URL);
 const lifecycle = new LifecycleManager();
 
-// ── 보안: Bearer 토큰 인증 미들웨어 ──
-// Bridge는 Public IP로 노출되므로 모든 요청에 인증 필수
+// ── Security: Bearer token authentication middleware ──
+// Bridge is exposed via Public IP, so all requests require authentication
 const BRIDGE_SECRET = process.env.BRIDGE_AUTH_TOKEN;
 app.use((req, res, next) => {
-  // /health는 ECS 헬스체크용으로 인증 면제
+  // /health is exempt from auth for ECS health checks
   if (req.path === "/health") return next();
   const token = req.headers.authorization?.replace("Bearer ", "");
   if (!BRIDGE_SECRET || token !== BRIDGE_SECRET) {
@@ -220,19 +220,19 @@ app.use((req, res, next) => {
   next();
 });
 
-// POST /message - Lambda에서 메시지 수신
-// IDOR 방지: userId는 Lambda가 JWT/connectionId에서 검증한 값만 전달.
-// Bridge는 이 값을 그대로 사용하며, 클라이언트 입력을 직접 신뢰하지 않음.
+// POST /message - Receive messages from Lambda
+// IDOR prevention: userId is only the value validated by Lambda from JWT/connectionId.
+// Bridge uses this value as-is and never directly trusts client input.
 app.post("/message", async (req, res) => {
   const { userId, message, channel, connectionId, callbackUrl } = req.body;
 
-  // 1. OpenClaw Gateway에 메시지 전달
+  // 1. Forward message to OpenClaw Gateway
   const stream = await ocClient.sendMessage(userId, message);
 
-  // 2. 즉시 202 Accepted 반환 (Lambda 타임아웃 방지)
+  // 2. Immediately return 202 Accepted (prevent Lambda timeout)
   res.status(202).json({ status: "processing" });
 
-  // 3. 스트리밍 응답을 @connections로 전달
+  // 3. Forward streaming response via @connections
   for await (const chunk of stream) {
     await callback.send(connectionId, {
       type: "stream_chunk",
@@ -241,12 +241,12 @@ app.post("/message", async (req, res) => {
   }
   await callback.send(connectionId, { type: "stream_end" });
 
-  // 4. 대화 이력 DynamoDB 저장
+  // 4. Save conversation history to DynamoDB
   await lifecycle.saveConversation(userId, message, stream.fullResponse);
   lifecycle.updateLastActivity();
 });
 
-// GET /health - 헬스체크 (인증 면제, 응답 최소화 — 내부 상태 노출 방지)
+// GET /health - Health check (auth exempt, minimal response — prevent internal state exposure)
 app.get("/health", (req, res) => {
   res.json({ status: "ok" });
 });
@@ -258,45 +258,45 @@ app.post("/shutdown", async (req, res) => {
 });
 ```
 
-#### OpenClaw Gateway WebSocket 프로토콜
+#### OpenClaw Gateway WebSocket Protocol
 
-OpenClaw Gateway는 **JSON-RPC 2.0 / MCP (Model Context Protocol)** 기반 WebSocket 서버다. MoltWorker는 이 프로토콜을 해석하지 않고 브라우저 ↔ Gateway 간 WebSocket을 그대로 프록시한다. 우리 Bridge는 이 프로토콜을 직접 구현해야 한다.
+OpenClaw Gateway is a WebSocket server based on **JSON-RPC 2.0 / MCP (Model Context Protocol)**. MoltWorker does not interpret this protocol and simply proxies WebSocket messages between browser and Gateway as-is. Our Bridge must implement this protocol directly.
 
-**연결 및 인증:**
+**Connection and Authentication:**
 ```
 ws://localhost:18789?token={MOLTBOT_GATEWAY_TOKEN}
 ```
-- `?token=` 쿼리 파라미터로 Gateway 토큰 전달 (MoltWorker `index.ts:296` 참조)
-- 토큰 미전달 또는 불일치 시 연결 거부
+- Pass the Gateway token via the `?token=` query parameter (see MoltWorker `index.ts:296`)
+- Connection is rejected if the token is missing or mismatched
 
-**메시지 형식 (JSON-RPC 2.0):**
+**Message format (JSON-RPC 2.0):**
 ```json
-// 클라이언트 → Gateway: 메시지 전송
+// Client → Gateway: Send message
 {"jsonrpc": "2.0", "method": "sendMessage", "params": {"message": "Hello"}, "id": 1}
 
-// Gateway → 클라이언트: 스트리밍 응답 (notification, id 없음)
-{"jsonrpc": "2.0", "method": "streamChunk", "params": {"content": "응답 텍스트..."}}
+// Gateway → Client: Streaming response (notification, no id)
+{"jsonrpc": "2.0", "method": "streamChunk", "params": {"content": "Response text..."}}
 
-// Gateway → 클라이언트: 스트림 종료
-{"jsonrpc": "2.0", "method": "streamEnd", "params": {"fullResponse": "전체 응답"}}
+// Gateway → Client: Stream end
+{"jsonrpc": "2.0", "method": "streamEnd", "params": {"fullResponse": "Complete response"}}
 
-// Gateway → 클라이언트: 에러 (MoltWorker index.ts:364 참조)
-{"error": {"message": "에러 메시지"}}
+// Gateway → Client: Error (see MoltWorker index.ts:364)
+{"error": {"message": "Error message"}}
 ```
 
-> **주의**: 위 메시지 형식은 MoltWorker 프록시 코드와 MCP 명세에서 추론한 것이다. OpenClaw 버전에 따라 정확한 method 이름과 params 구조가 다를 수 있으므로, **구현 시 실제 Gateway의 WebSocket 트래픽을 캡처하여 검증**해야 한다.
+> **Note**: The message formats above are inferred from MoltWorker proxy code and the MCP specification. The exact method names and params structure may differ depending on the OpenClaw version, so **you must capture and verify actual Gateway WebSocket traffic during implementation**.
 
-**Bridge의 프로토콜 어댑터 역할:**
+**Bridge's Protocol Adapter Role:**
 ```
-Lambda (HTTP POST) → Bridge → JSON-RPC 2.0 변환 → Gateway (WebSocket)
-                              ← 스트리밍 청크 수신 ←
+Lambda (HTTP POST) → Bridge → Convert to JSON-RPC 2.0 → Gateway (WebSocket)
+                              ← Receive streaming chunks ←
 Bridge → API Gateway @connections (HTTP POST) → Client (WebSocket)
 ```
 
-#### OpenClaw Gateway WebSocket 클라이언트
+#### OpenClaw Gateway WebSocket Client
 
 ```typescript
-// openclaw-client.ts 의사 코드
+// openclaw-client.ts pseudocode
 import WebSocket from "ws";
 
 export class OpenClawClient {
@@ -309,7 +309,7 @@ export class OpenClawClient {
   }
 
   private connect() {
-    // Gateway 토큰을 쿼리 파라미터로 전달
+    // Pass Gateway token as query parameter
     const token = process.env.OPENCLAW_GATEWAY_TOKEN;
     const url = token ? `${this.gatewayUrl}?token=${token}` : this.gatewayUrl;
     this.ws = new WebSocket(url);
@@ -321,14 +321,14 @@ export class OpenClawClient {
   private handleMessage(raw: WebSocket.Data) {
     const data = JSON.parse(raw.toString());
 
-    // 스트리밍 청크 (notification — id 없음)
+    // Streaming chunk (notification — no id)
     if (data.method === "streamChunk" && data.params?.requestId) {
       const pending = this.pending.get(data.params.requestId);
       if (pending) pending.chunks.push(data.params.content);
       return;
     }
 
-    // 스트림 종료
+    // Stream end
     if (data.method === "streamEnd" && data.params?.requestId) {
       const pending = this.pending.get(data.params.requestId);
       if (pending) {
@@ -338,11 +338,11 @@ export class OpenClawClient {
       return;
     }
 
-    // JSON-RPC 응답 (result 또는 error)
+    // JSON-RPC response (result or error)
     if (data.id && this.pending.has(data.id)) {
       const pending = this.pending.get(data.id)!;
       if (data.error) pending.resolve({ error: data.error });
-      // result는 streamEnd에서 처리
+      // result is handled in streamEnd
     }
   }
 
@@ -356,7 +356,7 @@ export class OpenClawClient {
       chunks,
     });
 
-    // JSON-RPC 2.0 형식으로 메시지 전송
+    // Send message in JSON-RPC 2.0 format
     this.ws.send(JSON.stringify({
       jsonrpc: "2.0",
       method: "sendMessage",
@@ -364,7 +364,7 @@ export class OpenClawClient {
       id,
     }));
 
-    // 청크가 쌓이면 yield, 종료 시 break
+    // Yield chunks as they accumulate, break on completion
     let lastIndex = 0;
     while (!done) {
       await new Promise((r) => setTimeout(r, 50));
@@ -372,7 +372,7 @@ export class OpenClawClient {
         yield chunks[lastIndex++];
       }
     }
-    // 남은 청크 모두 yield
+    // Yield all remaining chunks
     while (lastIndex < chunks.length) {
       yield chunks[lastIndex++];
     }
@@ -380,10 +380,10 @@ export class OpenClawClient {
 }
 ```
 
-#### API Gateway @connections 콜백
+#### API Gateway @connections Callback
 
 ```typescript
-// callback.ts 의사 코드
+// callback.ts pseudocode
 import {
   ApiGatewayManagementApiClient,
   PostToConnectionCommand,
@@ -407,56 +407,56 @@ export class CallbackSender {
 }
 ```
 
-### 2.3 Lambda ↔ Fargate 통신 패턴
+### 2.3 Lambda-Fargate Communication Pattern
 
 ```mermaid
 sequenceDiagram
-    participant Client as 웹 UI
+    participant Client as Web UI
     participant APIGW as API Gateway WS
     participant Lambda as ws-message Lambda
     participant DDB as DynamoDB TaskState
     participant ECS as ECS API
-    participant Bridge as Bridge 서버
+    participant Bridge as Bridge Server
     participant OC as OpenClaw Gateway
 
-    Client->>APIGW: 메시지 전송
+    Client->>APIGW: Send Message
     APIGW->>Lambda: $default route
 
-    Lambda->>DDB: TaskState 조회 (userId)
+    Lambda->>DDB: Query TaskState (userId)
 
-    alt 태스크 Running
-        Note over Lambda: publicIp 사용
+    alt Task Running
+        Note over Lambda: Use publicIp
         Lambda->>Bridge: POST https://{publicIp}:8080/message
-    else 태스크 없음/Idle
+    else Task None/Idle
         Lambda-->>APIGW: { type: "status", status: "starting" }
-        APIGW-->>Client: "에이전트를 깨우는 중..."
-        Lambda->>DDB: PendingMessages에 메시지 저장 (connectionId 포함)
+        APIGW-->>Client: "Waking up agent..."
+        Lambda->>DDB: Save message to PendingMessages (with connectionId)
         Lambda->>ECS: RunTask (Fargate Spot)
         Lambda->>DDB: TaskState → Starting
-        Note over Lambda: Lambda 종료 (메시지는 DDB에 보존)
-        Note over ECS,Bridge: Cold start ~30초-1분
-        Bridge->>DDB: TaskState → Running (publicIp 저장)
-        Bridge->>DDB: PendingMessages 조회 (userId)
-        Bridge->>OC: 대기 중이던 메시지 전달
+        Note over Lambda: Lambda exits (message preserved in DDB)
+        Note over ECS,Bridge: Cold start ~30s-1min
+        Bridge->>DDB: TaskState → Running (save publicIp)
+        Bridge->>DDB: Query PendingMessages (userId)
+        Bridge->>OC: Forward queued messages
         Bridge-->>APIGW: @connections POST { type: "status", status: "running" }
-        APIGW-->>Client: "에이전트 준비 완료"
-        Note over OC: 대기 메시지에 대한 응답 스트리밍 시작
+        APIGW-->>Client: "Agent ready"
+        Note over OC: Start streaming response for queued messages
     end
     Bridge->>OC: WebSocket RPC
     Bridge-->>Lambda: 202 Accepted
-    OC->>OC: LLM 호출 + 처리
+    OC->>OC: LLM call + processing
 
-    loop 스트리밍 청크
-        OC->>Bridge: 응답 청크
+    loop Streaming Chunks
+        OC->>Bridge: Response chunk
         Bridge->>APIGW: @connections POST { type: "stream_chunk" }
-        APIGW->>Client: 실시간 표시
+        APIGW->>Client: Display in real-time
     end
 
     Bridge->>APIGW: @connections POST { type: "stream_end" }
-    Bridge->>DDB: 대화 이력 저장
+    Bridge->>DDB: Save conversation history
 ```
 
-#### Lambda에서 Fargate Task IP 획득
+#### Obtaining Fargate Task IP from Lambda
 
 ```typescript
 // packages/gateway/src/services/container.ts
@@ -478,13 +478,13 @@ export async function getTaskPublicIP(
   const task = response.tasks?.[0];
   if (!task?.attachments?.[0]?.details) return null;
 
-  // Public IP가 할당된 Fargate 태스크에서는 ENI ID를 통해 Public IP를 조회
+  // For Fargate tasks with Public IP assigned, query Public IP via ENI ID
   const eniDetail = task.attachments[0].details.find(
     (d) => d.name === "networkInterfaceId"
   );
   if (!eniDetail?.value) return null;
 
-  // EC2 DescribeNetworkInterfaces로 Public IP 확인
+  // Obtain Public IP via EC2 DescribeNetworkInterfaces
   const { EC2Client, DescribeNetworkInterfacesCommand } = await import("@aws-sdk/client-ec2");
   const ec2 = new EC2Client({});
   const eniResp = await ec2.send(
@@ -505,7 +505,7 @@ export async function startTask(params: {
     new RunTaskCommand({
       cluster: params.cluster,
       taskDefinition: params.taskDefinition,
-      // launchType과 capacityProviderStrategy는 동시 지정 불가 — launchType 제거
+      // launchType and capacityProviderStrategy cannot be specified together — remove launchType
       capacityProviderStrategy: [
         { capacityProvider: "FARGATE_SPOT", weight: 1 },
       ],
@@ -526,9 +526,9 @@ export async function startTask(params: {
 }
 ```
 
-### 2.4 Graceful Shutdown (Spot 중단 대응)
+### 2.4 Graceful Shutdown (Spot Interruption Handling)
 
-MoltWorker는 컨테이너 종료를 외부에서 관리하지만, 우리는 Fargate Spot의 SIGTERM을 직접 처리해야 한다:
+MoltWorker manages container termination externally, but we must handle Fargate Spot's SIGTERM directly:
 
 ```typescript
 // packages/container/src/lifecycle.ts
@@ -549,7 +549,7 @@ export class LifecycleManager {
       s3Bucket: string;
     }
   ) {
-    // SIGTERM 핸들러 (Spot 중단 시 2분 전 수신)
+    // SIGTERM handler (received 2 minutes before Spot interruption)
     process.on("SIGTERM", () => this.gracefulShutdown());
   }
 
@@ -562,11 +562,11 @@ export class LifecycleManager {
     // 1. TaskState → Stopping
     await this.updateTaskState("Stopping");
 
-    // 2. OpenClaw config/workspace를 S3에 백업
+    // 2. Backup OpenClaw config/workspace to S3
     await this.backupToS3();
 
-    // 3. 활성 WebSocket 연결에 종료 알림
-    await this.notifyClients("에이전트가 종료됩니다. 잠시 후 다시 시작됩니다.");
+    // 3. Notify active WebSocket connections of shutdown
+    await this.notifyClients("Agent is shutting down. It will restart shortly.");
 
     // 4. TaskState → Idle
     await this.updateTaskState("Idle");
@@ -576,13 +576,13 @@ export class LifecycleManager {
   }
 
   async backupToS3(): Promise<void> {
-    // OpenClaw config, workspace, skills를 S3에 동기화
+    // Sync OpenClaw config, workspace, skills to S3
     const configDir = "/home/openclaw/.openclaw";
     const workspaceDir = "/home/openclaw/clawd";
-    // aws s3 sync 실행 또는 SDK로 파일 업로드
+    // Execute aws s3 sync or upload files via SDK
   }
 
-  // 5분 주기 S3 백업 (MoltWorker의 R2 sync 패턴 참조)
+  // Periodic S3 backup every 5 minutes (references MoltWorker's R2 sync pattern)
   startPeriodicBackup(intervalMs: number = 300000): void {
     setInterval(async () => {
       try {
@@ -596,9 +596,9 @@ export class LifecycleManager {
 }
 ```
 
-### 2.5 Config 패치 스크립트
+### 2.5 Config Patching Script
 
-MoltWorker의 인라인 Node.js 패치 패턴을 직접 참조:
+Directly references MoltWorker's inline Node.js patching pattern:
 
 ```typescript
 // packages/container/src/patch-config.ts
@@ -613,25 +613,25 @@ try {
   console.log("Starting with empty config");
 }
 
-// Gateway 설정
+// Gateway settings
 config.gateway = config.gateway || {};
 config.gateway.port = 18789;
 config.gateway.mode = "local";
 
-// 인증: 환경 변수 참조 방식 (디스크에 토큰 미기록)
-// OpenClaw Gateway는 OPENCLAW_GATEWAY_TOKEN 환경 변수를 직접 읽음
+// Authentication: environment variable reference method (no tokens written to disk)
+// OpenClaw Gateway reads the OPENCLAW_GATEWAY_TOKEN environment variable directly
 config.gateway.auth = { method: "env" };
-delete config.gateway?.auth?.token; // 기존 config에 토큰이 있으면 제거
+delete config.gateway?.auth?.token; // Remove token if it exists in existing config
 
-// LLM 프로바이더: 환경 변수 참조 (ANTHROPIC_API_KEY를 config에 기록하지 않음)
+// LLM provider: environment variable reference (ANTHROPIC_API_KEY not written to config)
 config.auth = { method: "env" };
-delete config.auth?.apiKey; // 기존 API 키가 있으면 제거
+delete config.auth?.apiKey; // Remove API key if it exists
 
-// Telegram 채널 비활성화 (webhook-only 방식 — Lambda가 모든 메시지 처리)
-// OpenClaw의 내장 long polling을 사용하지 않으므로 채널 설정 제거
+// Disable Telegram channel (webhook-only approach — Lambda handles all messages)
+// OpenClaw's built-in long polling is not used, so remove channel config
 delete config.channels?.telegram;
 
-// 모델 오버라이드
+// Model override
 if (process.env.LLM_MODEL) {
   config.agents = config.agents || {};
   config.agents.defaults = config.agents.defaults || {};
@@ -642,7 +642,7 @@ fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
 console.log("Configuration patched successfully");
 ```
 
-### 2.6 Watchdog Lambda 설계
+### 2.6 Watchdog Lambda Design
 
 ```typescript
 // packages/gateway/src/handlers/watchdog.ts
@@ -656,13 +656,13 @@ import { DynamoDBClient, ScanCommand, UpdateItemCommand } from "@aws-sdk/client-
 const INACTIVITY_TIMEOUT_MINUTES = parseInt(
   process.env.INACTIVITY_TIMEOUT_MINUTES || "15"
 );
-const MIN_UPTIME_MINUTES = 5; // Cold start 보호
+const MIN_UPTIME_MINUTES = 5; // Cold start protection
 
 export async function handler(): Promise<void> {
   const dynamodb = new DynamoDBClient({});
   const ecs = new ECSClient({});
 
-  // Running 상태인 태스크 스캔
+  // Scan for tasks in Running state
   const result = await dynamodb.send(
     new ScanCommand({
       TableName: process.env.TASK_STATE_TABLE,
@@ -680,10 +680,10 @@ export async function handler(): Promise<void> {
     const idleMinutes = (now - lastActivity) / 60000;
     const uptimeMinutes = (now - startedAt) / 60000;
 
-    // Cold start 보호: 시작 후 5분 이내는 종료하지 않음
+    // Cold start protection: do not terminate within 5 minutes of start
     if (uptimeMinutes < MIN_UPTIME_MINUTES) continue;
 
-    // 비활성 타임아웃 초과
+    // Inactivity timeout exceeded
     if (idleMinutes > INACTIVITY_TIMEOUT_MINUTES) {
       console.log(`Stopping idle task: ${item.taskArn.S}, idle: ${idleMinutes}min`);
 
@@ -709,21 +709,21 @@ export async function handler(): Promise<void> {
 }
 ```
 
-### 2.7 Docker 이미지 설계
+### 2.7 Docker Image Design
 
-MoltWorker의 Dockerfile을 참조하되 AWS/ARM64 최적화 적용:
+References MoltWorker's Dockerfile with AWS/ARM64 optimization applied:
 
 ```dockerfile
 # Dockerfile
 FROM node:20-slim AS base
 
-# ARM64 (Graviton) 최적화 - Spot 가용성 높음 + 20% 저렴
-# docker buildx build --platform linux/arm64 로 빌드
+# ARM64 (Graviton) optimization - higher Spot availability + 20% cheaper
+# Build with: docker buildx build --platform linux/arm64
 
-# OpenClaw 설치 (MoltWorker 패턴 참조)
+# Install OpenClaw (references MoltWorker pattern)
 RUN npm install -g openclaw@latest
 
-# AWS CLI 설치 (S3 백업용)
+# Install AWS CLI (for S3 backup)
 RUN apt-get update && apt-get install -y \
     curl unzip \
     && curl "https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip" -o "awscliv2.zip" \
@@ -731,29 +731,29 @@ RUN apt-get update && apt-get install -y \
     && rm -rf awscliv2.zip aws \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Bridge 서버 빌드
+# Build Bridge server
 WORKDIR /app
 COPY packages/container/package*.json ./
 RUN npm ci --production
 COPY packages/container/dist/ ./
 
-# 비root 사용자 생성 (컨테이너 탈출 시 권한 상승 방지)
+# Create non-root user (prevent privilege escalation on container escape)
 RUN groupadd -r openclaw && useradd -r -g openclaw -m -d /home/openclaw openclaw
 
-# OpenClaw 디렉토리 생성
+# Create OpenClaw directories
 RUN mkdir -p /home/openclaw/.openclaw \
     && mkdir -p /home/openclaw/clawd \
     && mkdir -p /home/openclaw/clawd/skills \
     && chown -R openclaw:openclaw /home/openclaw
 
-# 시작 스크립트 복사
+# Copy startup script
 COPY packages/container/start-openclaw.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/start-openclaw.sh
 
 USER openclaw
 WORKDIR /home/openclaw/clawd
 
-# 8080만 노출 (Gateway 18789는 localhost 바인딩이므로 EXPOSE 불필요)
+# Only expose 8080 (Gateway 18789 binds to localhost so EXPOSE is unnecessary)
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
@@ -762,12 +762,12 @@ HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
 CMD ["/usr/local/bin/start-openclaw.sh"]
 ```
 
-### 2.8 CDK 스택 핵심 구현
+### 2.8 CDK Stack Core Implementation
 
 #### WebSocket API Gateway + Lambda
 
 ```typescript
-// packages/cdk/lib/stacks/api-stack.ts 핵심 구조
+// packages/cdk/lib/stacks/api-stack.ts core structure
 import * as apigatewayv2 from "@aws-cdk/aws-apigatewayv2-alpha";
 import * as integrations from "@aws-cdk/aws-apigatewayv2-integrations-alpha";
 
@@ -799,7 +799,7 @@ const wsStage = new apigatewayv2.WebSocketStage(this, "ProdStage", {
   autoDeploy: true,
 });
 
-// Fargate 태스크에 @connections 권한 부여
+// Grant @connections permission to Fargate task
 taskRole.addToPolicy(
   new iam.PolicyStatement({
     actions: ["execute-api:ManageConnections"],
@@ -810,10 +810,10 @@ taskRole.addToPolicy(
 );
 ```
 
-#### Fargate 태스크 정의
+#### Fargate Task Definition
 
 ```typescript
-// packages/cdk/lib/stacks/compute-stack.ts 핵심 구조
+// packages/cdk/lib/stacks/compute-stack.ts core structure
 const taskDefinition = new ecs.FargateTaskDefinition(this, "OpenClawTask", {
   memoryLimitMiB: 512,
   cpu: 256,
@@ -860,31 +860,31 @@ taskDefinition.addContainer("openclaw", {
 
 ---
 
-## Part 3: 구현 계획
+## Part 3: Implementation Plan
 
-### Phase 1 MVP 구현 단계
+### Phase 1 MVP Implementation Steps
 
-총 10단계로 구성하며, 각 단계는 이전 단계의 결과물에 의존한다.
+Consists of 10 steps total, where each step depends on the outputs of previous steps.
 
-### 단계 1-1: 프로젝트 초기화
+### Step 1-1: Project Initialization
 
-**목표**: 모노레포 구조 설정, 공통 설정, CDK 부트스트랩
+**Goal**: Set up monorepo structure, shared configuration, CDK bootstrap
 
-**생성할 파일:**
+**Files to create:**
 
 ```
 serverless-openclaw/
-├── package.json                   # npm workspaces 루트
-├── tsconfig.json                  # 공통 TypeScript 설정
-├── tsconfig.base.json             # 기본 컴파일러 옵션
-├── .eslintrc.js                   # ESLint 공통 설정
-├── .prettierrc                    # Prettier 설정
+├── package.json                   # npm workspaces root
+├── tsconfig.json                  # Shared TypeScript configuration
+├── tsconfig.base.json             # Base compiler options
+├── .eslintrc.js                   # Shared ESLint configuration
+├── .prettierrc                    # Prettier configuration
 ├── packages/
 │   ├── cdk/
 │   │   ├── package.json
 │   │   ├── tsconfig.json
 │   │   ├── cdk.json
-│   │   └── bin/app.ts             # CDK 앱 진입점
+│   │   └── bin/app.ts             # CDK app entry point
 │   ├── gateway/
 │   │   ├── package.json
 │   │   └── tsconfig.json
@@ -898,86 +898,86 @@ serverless-openclaw/
 │       ├── package.json
 │       ├── tsconfig.json
 │       └── src/
-│           ├── types.ts           # 공유 타입 (메시지 프로토콜 등)
-│           └── constants.ts       # 공유 상수
+│           ├── types.ts           # Shared types (message protocol, etc.)
+│           └── constants.ts       # Shared constants
 ```
 
-**핵심 작업:**
-- npm workspaces 설정 (`"workspaces": ["packages/*"]`)
-- TypeScript 프로젝트 참조 (project references) 설정
-- CDK 앱 스켈레톤 생성 (`cdk init app --language typescript`)
-- 공유 타입 정의 (메시지 프로토콜, 상태 enum)
+**Key tasks:**
+- Set up npm workspaces (`"workspaces": ["packages/*"]`)
+- Configure TypeScript project references
+- Create CDK app skeleton (`cdk init app --language typescript`)
+- Define shared types (message protocol, state enums)
 
-**검증**: `npm install` + `npx tsc --build` 성공
+**Validation**: `npm install` + `npx tsc --build` succeeds
 
 ---
 
-### 단계 1-2: 인프라 기반 (Network + Storage)
+### Step 1-2: Infrastructure Foundation (Network + Storage)
 
-**목표**: VPC, DynamoDB 테이블, S3 버킷, ECR 리포지토리 배포
+**Goal**: Deploy VPC, DynamoDB tables, S3 buckets, ECR repository
 
-**생성할 파일:**
+**Files to create:**
 
 ```
 packages/cdk/lib/stacks/
-├── network-stack.ts               # VPC, 퍼블릭 서브넷, VPC Gateway Endpoints
-└── storage-stack.ts               # DynamoDB × 4, S3 × 2, ECR
+├── network-stack.ts               # VPC, public subnets, VPC Gateway Endpoints
+└── storage-stack.ts               # DynamoDB x 4, S3 x 2, ECR
 ```
 
-**NetworkStack 리소스:**
+**NetworkStack Resources:**
 - VPC (10.0.0.0/16)
-- 퍼블릭 서브넷 2개 (Fargate 태스크, Public IP 할당)
-- VPC Gateway Endpoints: DynamoDB, S3 (무료)
-- NAT Gateway 없음 (Fargate Public IP로 직접 인터넷 접근)
+- 2 public subnets (for Fargate tasks, Public IP assignment)
+- VPC Gateway Endpoints: DynamoDB, S3 (free)
+- No NAT Gateway (direct internet access via Fargate Public IP)
 
-**StorageStack 리소스:**
+**StorageStack Resources:**
 - DynamoDB: Conversations, Settings, TaskState, Connections, PendingMessages (PAY_PER_REQUEST)
-- S3: `serverless-openclaw-data` (OpenClaw 백업), `serverless-openclaw-web` (React SPA)
-- ECR: `serverless-openclaw` 리포지토리
+- S3: `serverless-openclaw-data` (OpenClaw backup), `serverless-openclaw-web` (React SPA)
+- ECR: `serverless-openclaw` repository
 
-**검증**: `cdk deploy NetworkStack StorageStack` 성공
+**Validation**: `cdk deploy NetworkStack StorageStack` succeeds
 
 ---
 
-### 단계 1-3: OpenClaw 컨테이너
+### Step 1-3: OpenClaw Container
 
-**목표**: Docker 이미지 빌드, Bridge 서버 구현, ECR 푸시
+**Goal**: Build Docker image, implement Bridge server, push to ECR
 
-**생성할 파일:**
+**Files to create:**
 
 ```
 packages/container/
 ├── Dockerfile
 ├── start-openclaw.sh
 ├── src/
-│   ├── bridge.ts                  # Express 서버
-│   ├── openclaw-client.ts         # OpenClaw Gateway WS 클라이언트
-│   ├── callback.ts                # API Gateway @connections 콜백
-│   ├── lifecycle.ts               # 생명주기 (SIGTERM, S3 백업, DDB 업데이트)
-│   ├── patch-config.ts            # openclaw.json 패치
+│   ├── bridge.ts                  # Express server
+│   ├── openclaw-client.ts         # OpenClaw Gateway WS client
+│   ├── callback.ts                # API Gateway @connections callback
+│   ├── lifecycle.ts               # Lifecycle (SIGTERM, S3 backup, DDB updates)
+│   ├── patch-config.ts            # openclaw.json patching
 │   └── types.ts
 ├── package.json
 └── tsconfig.json
 ```
 
-**핵심 작업:**
-1. Dockerfile 작성 (ARM64, Node 20 slim, OpenClaw 설치)
-2. start-openclaw.sh 작성 (S3 복원 → onboard → 패치 → 시작)
-3. Bridge 서버 구현 (`/message`, `/health`, `/shutdown`, `/status`)
-4. OpenClaw Gateway WebSocket 클라이언트 구현
-5. @connections 콜백 발신기 구현
-6. Lifecycle Manager 구현 (SIGTERM, 주기적 S3 백업)
-7. 로컬 Docker 빌드 + 테스트
+**Key tasks:**
+1. Write Dockerfile (ARM64, Node 20 slim, OpenClaw installation)
+2. Write start-openclaw.sh (S3 restore → onboard → patch → start)
+3. Implement Bridge server (`/message`, `/health`, `/shutdown`, `/status`)
+4. Implement OpenClaw Gateway WebSocket client
+5. Implement @connections callback sender
+6. Implement Lifecycle Manager (SIGTERM, periodic S3 backup)
+7. Local Docker build + test
 
-**검증**: 로컬에서 `docker build` + `docker run` + `/health` 응답 확인
+**Validation**: Local `docker build` + `docker run` + `/health` response confirmed
 
 ---
 
-### 단계 1-4: Gateway Lambda
+### Step 1-4: Gateway Lambda
 
-**목표**: 6개 Lambda 함수 구현
+**Goal**: Implement 6 Lambda functions
 
-**생성할 파일:**
+**Files to create:**
 
 ```
 packages/gateway/src/
@@ -987,109 +987,109 @@ packages/gateway/src/
 │   ├── ws-disconnect.ts           # WebSocket $disconnect
 │   ├── telegram-webhook.ts        # Telegram webhook
 │   ├── api-handler.ts             # REST API
-│   └── watchdog.ts                # EventBridge 트리거
+│   └── watchdog.ts                # EventBridge trigger
 ├── services/
-│   ├── container.ts               # ECS 태스크 관리 (start, stop, getIP)
-│   ├── message.ts                 # 메시지 라우팅 (Bridge HTTP 호출)
-│   ├── auth.ts                    # JWT 검증 헬퍼
-│   ├── connections.ts             # WebSocket 연결 관리 (DynamoDB)
-│   └── conversations.ts           # 대화 이력 관리 (DynamoDB)
+│   ├── container.ts               # ECS task management (start, stop, getIP)
+│   ├── message.ts                 # Message routing (Bridge HTTP calls)
+│   ├── auth.ts                    # JWT verification helper
+│   ├── connections.ts             # WebSocket connection management (DynamoDB)
+│   └── conversations.ts           # Conversation history management (DynamoDB)
 ├── index.ts
 └── types.ts
 ```
 
-**구현 순서:**
+**Implementation order:**
 1. `services/container.ts` — ECS RunTask, StopTask, DescribeTasks, getTaskIP
 2. `services/connections.ts` — connectionId CRUD (DynamoDB)
-3. `services/message.ts` — Bridge HTTP 호출 (`POST https://{publicIp}:8080/message`)
-4. `handlers/ws-connect.ts` — JWT 검증 + connectionId 저장
-5. `handlers/ws-message.ts` — TaskState 조회 → 컨테이너 시작/메시지 전달
-6. `handlers/ws-disconnect.ts` — connectionId 삭제
-7. `handlers/watchdog.ts` — 좀비 태스크 감지/종료
-8. `handlers/telegram-webhook.ts` — secret 검증 + 메시지 라우팅
-9. `handlers/api-handler.ts` — 대화 이력, 설정, 상태 API
+3. `services/message.ts` — Bridge HTTP calls (`POST https://{publicIp}:8080/message`)
+4. `handlers/ws-connect.ts` — JWT verification + save connectionId
+5. `handlers/ws-message.ts` — Query TaskState → start container/forward message
+6. `handlers/ws-disconnect.ts` — Delete connectionId
+7. `handlers/watchdog.ts` — Detect/terminate zombie tasks
+8. `handlers/telegram-webhook.ts` — Secret verification + message routing
+9. `handlers/api-handler.ts` — Conversation history, settings, status API
 
-**검증**: 단위 테스트 (vitest) 통과
+**Validation**: Unit tests (vitest) pass
 
 ---
 
-### 단계 1-5: API Gateway
+### Step 1-5: API Gateway
 
-**목표**: WebSocket API + REST API + Cognito Authorizer CDK 정의
+**Goal**: Define WebSocket API + REST API + Cognito Authorizer in CDK
 
-**생성할 파일:**
+**Files to create:**
 
 ```
 packages/cdk/lib/stacks/
-├── api-stack.ts                   # API Gateway + Lambda 배포
+├── api-stack.ts                   # API Gateway + Lambda deployment
 └── constructs/
     ├── websocket-api.ts           # WebSocket API construct
     └── rest-api.ts                # REST API construct
 ```
 
-**핵심 작업:**
+**Key tasks:**
 1. WebSocket API ($connect, $default, $disconnect routes)
-2. REST API (Telegram webhook, 관리 API 8개 엔드포인트)
-3. Cognito Authorizer 연결
-4. Lambda 함수 6개 배포 (esbuild 번들링)
-5. Lambda는 VPC 외부 배치 (공개 AWS endpoint 사용)
-6. IAM 역할/정책 연결
-7. EventBridge Rule (watchdog 5분 간격)
+2. REST API (Telegram webhook, 8 management API endpoints)
+3. Connect Cognito Authorizer
+4. Deploy 6 Lambda functions (esbuild bundling)
+5. Place Lambda outside VPC (uses public AWS endpoints)
+6. Attach IAM roles/policies
+7. EventBridge Rule (watchdog every 5 minutes)
 
-**검증**: `cdk deploy ApiStack` + WebSocket 연결 테스트
+**Validation**: `cdk deploy ApiStack` + WebSocket connection test
 
 ---
 
-### 단계 1-6: Cognito 인증
+### Step 1-6: Cognito Authentication
 
-**목표**: User Pool, App Client, 호스팅 UI 설정
+**Goal**: Set up User Pool, App Client, hosted UI
 
-**생성할 파일:**
+**Files to create:**
 
 ```
 packages/cdk/lib/stacks/
 └── auth-stack.ts                  # Cognito User Pool + App Client
 ```
 
-**핵심 작업:**
-1. Cognito User Pool (이메일 로그인, 비밀번호 정책)
-2. App Client (SPA용: PKCE flow)
-3. 도메인 설정 (Cognito 호스팅 도메인)
-4. 셀프 서비스 가입 + 이메일 인증
+**Key tasks:**
+1. Cognito User Pool (email login, password policy)
+2. App Client (for SPA: PKCE flow)
+3. Domain configuration (Cognito hosted domain)
+4. Self-service sign-up + email verification
 
-**검증**: Cognito 콘솔에서 테스트 사용자 생성 + JWT 발급 확인
+**Validation**: Create test user in Cognito console + confirm JWT issuance
 
 ---
 
-### 단계 1-7: Compute (ECS + Fargate)
+### Step 1-7: Compute (ECS + Fargate)
 
-**목표**: ECS 클러스터, Fargate 태스크 정의, Docker 이미지 배포
+**Goal**: Deploy ECS cluster, Fargate task definition, Docker image
 
-**생성할 파일:**
+**Files to create:**
 
 ```
 packages/cdk/lib/stacks/
-└── compute-stack.ts               # ECS 클러스터 + Fargate 태스크 정의
+└── compute-stack.ts               # ECS cluster + Fargate task definition
 ```
 
-**핵심 작업:**
-1. ECS 클러스터 생성
-2. Fargate 태스크 정의 (ARM64, 0.25 vCPU, 512MB, FARGATE_SPOT)
-3. ECR 이미지 빌드 + 푸시 (CDK DockerImageAsset)
-4. IAM 역할 (task role, execution role)
-5. Secrets Manager → 컨테이너 환경 변수
-6. CloudWatch Logs 그룹
-7. 보안 그룹 (인바운드: 8080 from 0.0.0.0/0 + Bridge 토큰 인증, 아웃바운드: 전체 허용)
+**Key tasks:**
+1. Create ECS cluster
+2. Fargate task definition (ARM64, 0.25 vCPU, 512MB, FARGATE_SPOT)
+3. ECR image build + push (CDK DockerImageAsset)
+4. IAM roles (task role, execution role)
+5. Secrets Manager → container environment variables
+6. CloudWatch Logs group
+7. Security group (inbound: 8080 from 0.0.0.0/0 + Bridge token auth, outbound: allow all)
 
-**검증**: `cdk deploy ComputeStack` + 수동 RunTask + /health 응답
+**Validation**: `cdk deploy ComputeStack` + manual RunTask + /health response
 
 ---
 
-### 단계 1-8: 웹 채팅 UI
+### Step 1-8: Web Chat UI
 
-**목표**: React SPA 개발, WebSocket 통신, S3/CloudFront 배포
+**Goal**: Develop React SPA, WebSocket communication, S3/CloudFront deployment
 
-**생성할 파일:**
+**Files to create:**
 
 ```
 packages/web/
@@ -1123,78 +1123,78 @@ packages/cdk/lib/stacks/
 └── web-stack.ts                   # S3 + CloudFront
 ```
 
-**핵심 작업:**
-1. Vite + React + TypeScript 프로젝트 설정
-2. Cognito 인증 통합 (`amazon-cognito-identity-js`)
-3. WebSocket 클라이언트 (자동 재연결, 지수 백오프)
-4. 채팅 UI (메시지 목록, 입력, 스트리밍 표시)
-5. Cold start 상태 표시 ("에이전트를 깨우는 중...")
-6. S3 정적 호스팅 + CloudFront CDK 배포
-7. 빌드 시 환경 변수 주입 (WS URL, API URL, Cognito 설정)
+**Key tasks:**
+1. Vite + React + TypeScript project setup
+2. Cognito authentication integration (`amazon-cognito-identity-js`)
+3. WebSocket client (auto-reconnect, exponential backoff)
+4. Chat UI (message list, input, streaming display)
+5. Cold start status display ("Waking up agent...")
+6. S3 static hosting + CloudFront CDK deployment
+7. Inject environment variables at build time (WS URL, API URL, Cognito settings)
 
-**검증**: 로컬 `npm run dev` + WebSocket 연결 + 메시지 송수신
-
----
-
-### 단계 1-9: Telegram 봇 통합
-
-**목표**: Telegram webhook 설정, 페어링 흐름, 메시지 라우팅
-
-**핵심 작업:**
-1. Telegram Bot 생성 (BotFather)
-2. Webhook URL 등록 (`POST /telegram` REST API 엔드포인트)
-3. Secret token 검증 구현
-4. 페어링 흐름 구현 (웹 UI에서 코드 생성 → Telegram에서 `/pair {코드}`)
-5. 메시지 라우팅 (Lambda → Bridge → OpenClaw)
-6. 컨테이너 미실행 시 "깨우는 중..." 응답 + 컨테이너 시작
-
-**검증**: Telegram에서 메시지 전송 → 응답 수신
+**Validation**: Local `npm run dev` + WebSocket connection + message send/receive
 
 ---
 
-### 단계 1-10: 통합 테스트 및 배포 문서화
+### Step 1-9: Telegram Bot Integration
 
-**목표**: E2E 테스트, 배포 가이드, 최종 검증
+**Goal**: Set up Telegram webhook, pairing flow, message routing
 
-**생성할 파일:**
+**Key tasks:**
+1. Create Telegram Bot (BotFather)
+2. Register webhook URL (`POST /telegram` REST API endpoint)
+3. Implement secret token verification
+4. Implement pairing flow (generate code in web UI → `/pair {code}` in Telegram)
+5. Message routing (Lambda → Bridge → OpenClaw)
+6. "Waking up..." response when container is not running + start container
+
+**Validation**: Send message in Telegram → receive response
+
+---
+
+### Step 1-10: Integration Testing and Deployment Documentation
+
+**Goal**: E2E testing, deployment guide, final validation
+
+**Files to create:**
 
 ```
 docs/
-├── deployment.md                  # 배포 가이드
-└── development.md                 # 개발 가이드
+├── deployment.md                  # Deployment guide
+└── development.md                 # Development guide
 
 packages/cdk/bin/
-└── app.ts                         # 전체 스택 배포 순서 정의
+└── app.ts                         # Define full stack deployment order
 ```
 
-**핵심 작업:**
-1. `cdk deploy --all` 통합 테스트
-2. E2E 시나리오 테스트:
-   - 웹 UI 로그인 → 채팅 → 컨테이너 자동 시작 → 응답 수신
-   - Telegram 메시지 → 응답 수신
-   - 비활성 15분 → 컨테이너 자동 종료
-   - 재접속 → 컨테이너 재시작 → 대화 이력 유지
-3. 배포 가이드 문서화 (사전 요구사항, 단계별 명령어, 트러블슈팅)
-4. 개발 가이드 문서화 (로컬 개발 환경, 테스트, 기여 가이드)
+**Key tasks:**
+1. `cdk deploy --all` integration test
+2. E2E scenario tests:
+   - Web UI login → chat → automatic container start → receive response
+   - Telegram message → receive response
+   - 15 minutes of inactivity → automatic container shutdown
+   - Reconnect → container restart → conversation history preserved
+3. Document deployment guide (prerequisites, step-by-step commands, troubleshooting)
+4. Document development guide (local development environment, testing, contribution guide)
 
-**검증**: 클린 AWS 계정에서 `cdk deploy --all` 성공
+**Validation**: `cdk deploy --all` succeeds on a clean AWS account
 
 ---
 
-### 단계별 의존 관계
+### Step Dependency Graph
 
 ```mermaid
 graph TD
-    S1["1-1\n프로젝트 초기화"]
-    S2["1-2\n인프라 기반"]
-    S3["1-3\nOpenClaw 컨테이너"]
+    S1["1-1\nProject Initialization"]
+    S2["1-2\nInfrastructure Foundation"]
+    S3["1-3\nOpenClaw Container"]
     S4["1-4\nGateway Lambda"]
     S5["1-5\nAPI Gateway"]
-    S6["1-6\nCognito 인증"]
+    S6["1-6\nCognito Authentication"]
     S7["1-7\nCompute"]
-    S8["1-8\n웹 채팅 UI"]
-    S9["1-9\nTelegram 봇"]
-    S10["1-10\n통합 테스트"]
+    S8["1-8\nWeb Chat UI"]
+    S9["1-9\nTelegram Bot"]
+    S10["1-10\nIntegration Testing"]
 
     S1 --> S2
     S1 --> S3
@@ -1213,32 +1213,32 @@ graph TD
     S9 --> S10
 ```
 
-**병렬 작업 가능:**
-- 1-3 (컨테이너) + 1-4 (Lambda) + 1-6 (Cognito)는 병렬 개발 가능
-- 1-8 (웹 UI)와 1-9 (Telegram)는 API Gateway 완성 후 병렬 가능
+**Parallelizable work:**
+- 1-3 (Container) + 1-4 (Lambda) + 1-6 (Cognito) can be developed in parallel
+- 1-8 (Web UI) and 1-9 (Telegram) can be parallelized after API Gateway is complete
 
 ---
 
-## 참고 자료
+## References
 
-### MoltWorker 참조
+### MoltWorker Reference
 
-- [MoltWorker Repository](https://github.com/cloudflare/moltworker) — `references/moltworker/`에 클론됨
-- `src/index.ts` — Worker 프록시 + WebSocket 릴레이 패턴
-- `src/gateway/process.ts` — 컨테이너 생명주기 관리 (`ensureMoltbotGateway`)
-- `start-openclaw.sh` — 컨테이너 시작 스크립트 (R2 복원 → onboard → config 패치)
-- `src/gateway/sync.ts` — R2 백업 동기화 패턴
+- [MoltWorker Repository](https://github.com/cloudflare/moltworker) — Cloned in `references/moltworker/`
+- `src/index.ts` — Worker proxy + WebSocket relay pattern
+- `src/gateway/process.ts` — Container lifecycle management (`ensureMoltbotGateway`)
+- `start-openclaw.sh` — Container startup script (R2 restore → onboard → config patch)
+- `src/gateway/sync.ts` — R2 backup synchronization pattern
 
-### AWS 공식 문서
+### AWS Official Documentation
 
-- [Fargate Task Networking](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/fargate-task-networking.html) — 태스크 프라이빗 IP 획득
-- [Fargate Capacity Providers](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/fargate-capacity-providers.html) — Spot 중단 대응
-- [Graceful Shutdowns with ECS](https://aws.amazon.com/blogs/containers/graceful-shutdowns-with-ecs/) — SIGTERM 처리
+- [Fargate Task Networking](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/fargate-task-networking.html) — Obtaining task private IP
+- [Fargate Capacity Providers](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/fargate-capacity-providers.html) — Spot interruption handling
+- [Graceful Shutdowns with ECS](https://aws.amazon.com/blogs/containers/graceful-shutdowns-with-ecs/) — SIGTERM handling
 - [API Gateway WebSocket](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-websocket-api.html) — @connections API
-- [Fargate Graviton Spot](https://towardsaws.com/aws-fargate-graviton-spot-76-cheaper-d27f8c570a19) — ARM64 비용 최적화
+- [Fargate Graviton Spot](https://towardsaws.com/aws-fargate-graviton-spot-76-cheaper-d27f8c570a19) — ARM64 cost optimization
 
-### OpenClaw 참조
+### OpenClaw Reference
 
-- [OpenClaw Architecture](https://vertu.com/ai-tools/openclaw-clawdbot-architecture-engineering-reliable-and-controllable-ai-agents/) — Gateway 아키텍처, Lane Queue, Agent Runner
-- [OpenClaw Setup Guide](https://www.jitendrazaa.com/blog/ai/clawdbot-complete-guide-open-source-ai-assistant-2026/) — onboard, config 구조, gateway 설정
-- [OpenClaw Docs](https://docs.openclaw.ai/) — 공식 문서
+- [OpenClaw Architecture](https://vertu.com/ai-tools/openclaw-clawdbot-architecture-engineering-reliable-and-controllable-ai-agents/) — Gateway architecture, Lane Queue, Agent Runner
+- [OpenClaw Setup Guide](https://www.jitendrazaa.com/blog/ai/clawdbot-complete-guide-open-source-ai-assistant-2026/) — onboard, config structure, gateway settings
+- [OpenClaw Docs](https://docs.openclaw.ai/) — Official documentation
