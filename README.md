@@ -181,6 +181,7 @@ AWS deployment: [Deployment Guide](docs/deployment.md) | Local development detai
 - [Deployment Guide](docs/deployment.md)
 - [Development Guide](docs/development.md)
 - [Project Progress Plan](docs/progress.md)
+- [User Guide (Quick Start)](docs/user-guide.md)
 
 ## License
 
