@@ -15,7 +15,6 @@ export class StorageStack extends cdk.Stack {
 
   // S3 buckets
   public readonly dataBucket: s3.Bucket;
-  public readonly webBucket: s3.Bucket;
 
   // ECR
   public readonly ecrRepository: ecr.Repository;
@@ -82,15 +81,6 @@ export class StorageStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 
-    this.webBucket = new s3.Bucket(this, "WebBucket", {
-      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-      encryption: s3.BucketEncryption.S3_MANAGED,
-      websiteIndexDocument: "index.html",
-      websiteErrorDocument: "index.html",
-      autoDeleteObjects: true,
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
-    });
-
     // ── ECR Repository ──
 
     this.ecrRepository = new ecr.Repository(this, "EcrRepo", {
@@ -119,9 +109,6 @@ export class StorageStack extends cdk.Stack {
     });
     new cdk.CfnOutput(this, "DataBucketName", {
       value: this.dataBucket.bucketName,
-    });
-    new cdk.CfnOutput(this, "WebBucketName", {
-      value: this.webBucket.bucketName,
     });
     new cdk.CfnOutput(this, "EcrRepositoryUri", {
       value: this.ecrRepository.repositoryUri,

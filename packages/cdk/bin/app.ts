@@ -7,6 +7,7 @@ import {
   AuthStack,
   ComputeStack,
   ApiStack,
+  WebStack,
 } from "../lib/stacks/index.js";
 
 const app = new cdk.App();
@@ -32,7 +33,7 @@ const compute = new ComputeStack(app, "ComputeStack", {
 });
 
 // Step 1-5: API Gateway + Lambda
-new ApiStack(app, "ApiStack", {
+const api = new ApiStack(app, "ApiStack", {
   vpc: network.vpc,
   fargateSecurityGroup: network.fargateSecurityGroup,
   conversationsTable: storage.conversationsTable,
@@ -46,7 +47,12 @@ new ApiStack(app, "ApiStack", {
   taskDefinition: compute.taskDefinition,
 });
 
-// Step 1-8에서 구현:
-// new WebStack(app, "WebStack");
+// Step 1-8: Web UI (S3 + CloudFront)
+new WebStack(app, "WebStack", {
+  webSocketUrl: `wss://${api.webSocketApi.apiId}.execute-api.${cdk.Aws.REGION}.amazonaws.com/prod`,
+  apiUrl: api.httpApi.apiEndpoint,
+  userPoolId: auth.userPool.userPoolId,
+  userPoolClientId: auth.userPoolClient.userPoolClientId,
+});
 
 app.synth();

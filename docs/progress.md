@@ -9,7 +9,7 @@ Serverless OpenClaw 프로젝트의 전체 진행 상황과 앞으로의 계획�
 | Phase | 설명 | 상태 |
 |-------|------|------|
 | **Phase 0** | 문서화 및 설계 | **완료** |
-| **Phase 1** | MVP 구현 (10단계) | **진행 중** (7/10) |
+| **Phase 1** | MVP 구현 (10단계) | **진행 중** (8/10) |
 | Phase 2 | 브라우저 자동화 + 커스텀 Skills | 미착수 |
 | Phase 3 | 고급 기능 (모니터링, 스케줄링, 멀티채널) | 미착수 |
 
@@ -113,7 +113,7 @@ graph TD
 | **1-5** | API Gateway | WebSocket API + REST API CDK, Cognito Authorizer, Lambda 배포, EventBridge Rule | `cdk deploy ApiStack` + WebSocket 연결 테스트 | **완료** |
 | **1-6** | Cognito 인증 | AuthStack (User Pool, App Client, PKCE flow, 호스팅 도메인) | Cognito 테스트 사용자 + JWT 발급 확인 | **완료** |
 | **1-7** | Compute | ComputeStack (ECS 클러스터, Fargate 태스크 정의, ARM64, FARGATE_SPOT, Secrets Manager) | `cdk deploy ComputeStack` + 수동 RunTask + `/health` 응답 | **완료** |
-| **1-8** | 웹 채팅 UI | React SPA (Vite), Cognito 인증, WebSocket 클라이언트, 채팅 UI, Cold start 상태, WebStack CDK | 로컬 `npm run dev` + WebSocket + 메시지 송수신 | 미착수 |
+| **1-8** | 웹 채팅 UI | React SPA (Vite), Cognito 인증, WebSocket 클라이언트, 채팅 UI, Cold start 상태, WebStack CDK | 로컬 `npm run dev` + WebSocket + 메시지 송수신 | **완료** |
 | **1-9** | Telegram 봇 | Webhook 등록, secret token 검증, 페어링 흐름, 메시지 라우팅, cold start 응답 | Telegram 메시지 → 응답 수신 | 미착수 |
 | **1-10** | 통합 테스트/문서화 | E2E 테스트, deployment.md, development.md | 클린 AWS 계정에서 `cdk deploy --all` 성공 | 미착수 |
 
@@ -156,6 +156,40 @@ graph TD
 - AWS SDK send 바인딩: `ddb.send.bind(ddb) as (cmd: any) => Promise<any>`
 - userId 서버사이드만: JWT sub (웹) / `telegram:{fromId}` (Telegram)
 - IDOR 방지: 클라이언트 userId 절대 신뢰하지 않음
+
+### 1-8 웹 채팅 UI 상세 (완료)
+
+| 구분 | 파일 | 설명 |
+|------|------|------|
+| **프로젝트 설정** | `index.html` | Vite 엔트리 포인트 |
+| | `vite.config.ts` | `@vitejs/plugin-react`, `VITE_` prefix |
+| | `vite-env.d.ts` | 환경변수 타입 선언 (WS_URL, API_URL, COGNITO_*) |
+| **인증** | `services/auth.ts` | Cognito SRP 인증 래퍼 (signIn/signUp/confirmSignUp/signOut/getSession) |
+| | `hooks/useAuth.ts` | 인증 상태 훅 (세션 복구, 에러 처리) |
+| | `components/Auth/AuthProvider.tsx` | React Context 인증 전역 제공 |
+| | `components/Auth/LoginForm.tsx` | 로그인/회원가입/인증코드 확인 폼 |
+| **WebSocket** | `services/websocket.ts` | WebSocketClient 클래스 (자동 재연결, 지수 백오프, 하트비트) |
+| | `hooks/useWebSocket.ts` | WS 연결 훅 (메시지/스트리밍/상태 관리) |
+| **REST API** | `services/api.ts` | fetchConversations, fetchStatus |
+| **채팅 UI** | `components/Chat/ChatContainer.tsx` | 메인 레이아웃 (AgentStatus + MessageList + MessageInput) |
+| | `components/Chat/MessageList.tsx` | 메시지 목록 (자동 스크롤, 스트리밍 커서) |
+| | `components/Chat/MessageInput.tsx` | 입력 (Enter 전송, Shift+Enter 줄바꿈, 자동 높이) |
+| | `components/Status/AgentStatus.tsx` | 에이전트 상태 표시 (Idle/Starting/Running/Stopping) |
+| **CDK** | `web-stack.ts` | S3 버킷 + CloudFront (OAC, SPA 라우팅, BucketDeployment) |
+
+검증 결과:
+- TypeScript 빌드: 통과
+- Vite 빌드: 통과 (dist/ 생성)
+- CDK synth: 통과 (WebStack 포함 6개 스택)
+- ESLint: 통과
+- 단위 테스트: 92개 전체 통과 (기존 테스트 미파손)
+
+설계 결정:
+- S3 webBucket을 WebStack 내부에 생성 (StorageStack → WebStack 순환 의존성 방지)
+- `amazon-cognito-identity-js` SRP 인증 (Hosted UI 불필요)
+- `@serverless-openclaw/shared` 직접 import (Vite Bundler 모듈 해석)
+- WebSocket `?token={idToken}` 쿼리 인증 (API GW $connect Authorization 헤더 미지원)
+- Plain CSS + CSS 변수 (다크/라이트 모드 자동 감지)
 
 ---
 

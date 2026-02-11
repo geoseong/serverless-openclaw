@@ -1,0 +1,8 @@
+.app-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+}

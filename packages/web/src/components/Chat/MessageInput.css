@@ -1,0 +1,41 @@
+.message-input {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.message-input textarea {
+  flex: 1;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  font-size: 0.875rem;
+  font-family: inherit;
+  resize: none;
+  background: var(--color-bg);
+  color: var(--color-text);
+  line-height: 1.4;
+}
+
+.message-input textarea:focus {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -1px;
+}
+
+.message-input button {
+  padding: 0.625rem 1rem;
+  border: none;
+  border-radius: 4px;
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 0.875rem;
+  cursor: pointer;
+  align-self: flex-end;
+}
+
+.message-input button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
