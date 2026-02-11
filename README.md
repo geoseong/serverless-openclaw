@@ -163,6 +163,7 @@ Organized as an npm workspaces monorepo with TypeScript project references.
 
 ```bash
 npm install          # Install dependencies
+cp .env.example .env # Configure AWS profile (edit .env)
 npm run build        # TypeScript build
 npm run lint         # ESLint check
 npm run format       # Prettier formatting

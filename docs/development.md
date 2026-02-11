@@ -33,6 +33,25 @@ npm run build
 # pre-push: E2E tests
 ```
 
+### AWS Profile Configuration
+
+Copy the example file and set your AWS profile:
+
+```bash
+cp .env.example .env
+# Edit .env:
+#   AWS_PROFILE=your-aws-profile-name
+#   AWS_REGION=ap-northeast-2
+```
+
+Load before running CDK or AWS CLI commands:
+
+```bash
+export $(cat .env | xargs)
+```
+
+> `.env` is in `.gitignore` and will not be committed. See `.env.example` for the template.
+
 ---
 
 ## 2. Project Structure

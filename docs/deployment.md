@@ -18,10 +18,34 @@ This guide covers the complete process for deploying Serverless OpenClaw on a cl
 
 ```bash
 # Configure AWS CLI profile
-aws configure --profile serverless-openclaw
+aws configure --profile <YOUR_PROFILE_NAME>
+```
 
+### Configure `.env`
+
+Copy the example file and set your AWS profile name:
+
+```bash
+cp .env.example .env
+# Edit .env with your values:
+#   AWS_PROFILE=your-aws-profile-name
+#   AWS_REGION=ap-northeast-2
+```
+
+Then load the environment before running any AWS/CDK commands:
+
+```bash
+export $(cat .env | xargs)
+```
+
+> `.env` is in `.gitignore` and will not be committed. See `.env.example` for the template.
+
+### CDK Bootstrap
+
+```bash
 # CDK Bootstrap (once per account)
-npx cdk bootstrap aws://<ACCOUNT_ID>/<REGION> --profile serverless-openclaw
+export $(cat .env | xargs)
+npx cdk bootstrap aws://<ACCOUNT_ID>/$AWS_REGION
 ```
 
 ---
@@ -35,19 +59,19 @@ Before deployment, you must manually create 3 secrets in AWS Secrets Manager.
 aws secretsmanager create-secret \
   --name "serverless-openclaw/bridge-auth-token" \
   --secret-string "<YOUR_BRIDGE_TOKEN>" \
-  --profile serverless-openclaw
+  --profile $AWS_PROFILE
 
 # OpenClaw Gateway token
 aws secretsmanager create-secret \
   --name "serverless-openclaw/openclaw-gateway-token" \
   --secret-string "<YOUR_GATEWAY_TOKEN>" \
-  --profile serverless-openclaw
+  --profile $AWS_PROFILE
 
 # Anthropic API key
 aws secretsmanager create-secret \
   --name "serverless-openclaw/anthropic-api-key" \
   --secret-string "<YOUR_ANTHROPIC_API_KEY>" \
-  --profile serverless-openclaw
+  --profile $AWS_PROFILE
 ```
 
 > **bridge-auth-token** should be a randomly generated long string (e.g., `openssl rand -hex 32`).
@@ -59,7 +83,7 @@ aws secretsmanager create-secret \
 aws secretsmanager create-secret \
   --name "serverless-openclaw/telegram-bot-token" \
   --secret-string "<YOUR_TELEGRAM_BOT_TOKEN>" \
-  --profile serverless-openclaw
+  --profile $AWS_PROFILE
 ```
 
 ---
@@ -91,7 +115,7 @@ cd packages/web && npx vite build && cd ../..
 
 ```bash
 cd packages/cdk
-npx cdk deploy --all --profile serverless-openclaw --require-approval broadening
+npx cdk deploy --all --profile $AWS_PROFILE --require-approval broadening
 ```
 
 ### Deploy Stacks Individually (Optional)
@@ -102,17 +126,17 @@ Deployment order based on dependencies:
 cd packages/cdk
 
 # Step 1: Base infrastructure
-npx cdk deploy NetworkStack StorageStack --profile serverless-openclaw
+npx cdk deploy NetworkStack StorageStack --profile $AWS_PROFILE
 
 # Step 2: Auth + Compute
-npx cdk deploy AuthStack --profile serverless-openclaw
-npx cdk deploy ComputeStack --profile serverless-openclaw
+npx cdk deploy AuthStack --profile $AWS_PROFILE
+npx cdk deploy ComputeStack --profile $AWS_PROFILE
 
 # Step 3: API Gateway + Lambda
-npx cdk deploy ApiStack --profile serverless-openclaw
+npx cdk deploy ApiStack --profile $AWS_PROFILE
 
 # Step 4: Web UI
-npx cdk deploy WebStack --profile serverless-openclaw
+npx cdk deploy WebStack --profile $AWS_PROFILE
 ```
 
 ### Push Docker Image
@@ -121,7 +145,7 @@ To run the Fargate container, you need to push a Docker image to ECR.
 
 ```bash
 # ECR login
-aws ecr get-login-password --region <REGION> --profile serverless-openclaw \
+aws ecr get-login-password --region <REGION> --profile $AWS_PROFILE \
   | docker login --username AWS --password-stdin <ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com
 
 # Build + push image
@@ -161,13 +185,13 @@ aws cognito-idp sign-up \
   --client-id <USER_POOL_CLIENT_ID> \
   --username user@example.com \
   --password "YourPassword1!" \
-  --profile serverless-openclaw
+  --profile $AWS_PROFILE
 
 # Verify email (force confirm with admin privileges)
 aws cognito-idp admin-confirm-sign-up \
   --user-pool-id <USER_POOL_ID> \
   --username user@example.com \
-  --profile serverless-openclaw
+  --profile $AWS_PROFILE
 ```
 
 ---
@@ -224,8 +248,8 @@ wscat -c "<WebSocketApiEndpoint>?token=<ID_TOKEN>"
 ### Check ECS Task Status
 
 ```bash
-aws ecs list-tasks --cluster serverless-openclaw --profile serverless-openclaw
-aws ecs describe-tasks --cluster serverless-openclaw --tasks <TASK_ARN> --profile serverless-openclaw
+aws ecs list-tasks --cluster serverless-openclaw --profile $AWS_PROFILE
+aws ecs describe-tasks --cluster serverless-openclaw --tasks <TASK_ARN> --profile $AWS_PROFILE
 ```
 
 ---
@@ -238,7 +262,7 @@ aws ecs describe-tasks --cluster serverless-openclaw --tasks <TASK_ARN> --profil
 # After code changes
 npm run build
 cd packages/web && npx vite build && cd ../..
-cd packages/cdk && npx cdk deploy --all --profile serverless-openclaw
+cd packages/cdk && npx cdk deploy --all --profile $AWS_PROFILE
 ```
 
 ### Update OpenClaw Container
@@ -257,7 +281,7 @@ docker push <ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/serverless-openclaw:late
 
 ```bash
 cd packages/cdk
-npx cdk destroy --all --profile serverless-openclaw
+npx cdk destroy --all --profile $AWS_PROFILE
 ```
 
 > Since `removalPolicy: DESTROY` is set, DynamoDB tables, S3 buckets, and ECR repositories will be deleted together. **If you have production data, back it up before deleting.**
@@ -288,7 +312,7 @@ Error: Secrets Manager can't find the specified secret
 
 ```bash
 # Check CloudWatch logs
-aws logs tail /ecs/serverless-openclaw --follow --profile serverless-openclaw
+aws logs tail /ecs/serverless-openclaw --follow --profile $AWS_PROFILE
 ```
 
 **Common causes:**
