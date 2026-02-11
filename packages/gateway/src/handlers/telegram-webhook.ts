@@ -6,6 +6,7 @@ import { ECSClient } from "@aws-sdk/client-ecs";
 import { getTaskState, putTaskState } from "../services/task-state.js";
 import { routeMessage, savePendingMessage } from "../services/message.js";
 import { startTask } from "../services/container.js";
+import { sendTelegramMessage } from "../services/telegram.js";
 
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const ecs = new ECSClient({});
@@ -50,12 +51,27 @@ export async function handler(event: {
 
   const chatId = update.message.chat.id;
   const userId = `telegram:${update.message.from?.id ?? chatId}`;
+  const connectionId = `telegram:${chatId}`;
+  const botToken = process.env.TELEGRAM_BOT_TOKEN ?? "";
+
+  // Check task state for cold start reply
+  const taskState = await getTaskState(dynamoSend, userId);
+  const needsColdStart = !taskState || taskState.status === "Starting";
+
+  if (needsColdStart && botToken) {
+    await sendTelegramMessage(
+      fetch as never,
+      botToken,
+      connectionId,
+      "🔄 에이전트를 깨우는 중... 잠시만 기다려주세요.",
+    );
+  }
 
   await routeMessage({
     userId,
     message: update.message.text,
     channel: "telegram",
-    connectionId: `telegram:${chatId}`,
+    connectionId,
     callbackUrl: process.env.WEBSOCKET_CALLBACK_URL ?? "",
     bridgeAuthToken: process.env.BRIDGE_AUTH_TOKEN ?? "",
     fetchFn: fetch as never,

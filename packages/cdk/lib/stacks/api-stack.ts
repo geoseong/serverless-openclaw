@@ -153,6 +153,10 @@ export class ApiStack extends cdk.Stack {
       "TELEGRAM_SECRET_TOKEN",
       telegramBotToken.secretValue.unsafeUnwrap(),
     );
+    telegramWebhookFn.addEnvironment(
+      "TELEGRAM_BOT_TOKEN",
+      telegramBotToken.secretValue.unsafeUnwrap(),
+    );
 
     // ── IAM Permissions for all Lambda functions ──
 

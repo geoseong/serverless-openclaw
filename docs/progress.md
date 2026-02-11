@@ -9,7 +9,7 @@ Serverless OpenClaw 프로젝트의 전체 진행 상황과 앞으로의 계획�
 | Phase | 설명 | 상태 |
 |-------|------|------|
 | **Phase 0** | 문서화 및 설계 | **완료** |
-| **Phase 1** | MVP 구현 (10단계) | **진행 중** (8/10) |
+| **Phase 1** | MVP 구현 (10단계) | **완료** (10/10) |
 | Phase 2 | 브라우저 자동화 + 커스텀 Skills | 미착수 |
 | Phase 3 | 고급 기능 (모니터링, 스케줄링, 멀티채널) | 미착수 |
 
@@ -66,7 +66,7 @@ Serverless OpenClaw 프로젝트의 전체 진행 상황과 앞으로의 계획�
 
 ---
 
-## Phase 1: MVP 구현 (진행 중)
+## Phase 1: MVP 구현 (완료)
 
 10단계로 구성. 각 단계는 이전 단계의 결과물에 의존한다.
 
@@ -114,8 +114,8 @@ graph TD
 | **1-6** | Cognito 인증 | AuthStack (User Pool, App Client, PKCE flow, 호스팅 도메인) | Cognito 테스트 사용자 + JWT 발급 확인 | **완료** |
 | **1-7** | Compute | ComputeStack (ECS 클러스터, Fargate 태스크 정의, ARM64, FARGATE_SPOT, Secrets Manager) | `cdk deploy ComputeStack` + 수동 RunTask + `/health` 응답 | **완료** |
 | **1-8** | 웹 채팅 UI | React SPA (Vite), Cognito 인증, WebSocket 클라이언트, 채팅 UI, Cold start 상태, WebStack CDK | 로컬 `npm run dev` + WebSocket + 메시지 송수신 | **완료** |
-| **1-9** | Telegram 봇 | Webhook 등록, secret token 검증, 페어링 흐름, 메시지 라우팅, cold start 응답 | Telegram 메시지 → 응답 수신 | 미착수 |
-| **1-10** | 통합 테스트/문서화 | E2E 테스트, deployment.md, development.md | 클린 AWS 계정에서 `cdk deploy --all` 성공 | 미착수 |
+| **1-9** | Telegram 봇 | Webhook 등록, secret token 검증, 메시지 라우팅, cold start 응답, Bot API sendMessage | Telegram 메시지 → 응답 수신 | **완료** |
+| **1-10** | 통합 테스트/문서화 | E2E 테스트, deployment.md, development.md | 클린 AWS 계정에서 `cdk deploy --all` 성공 | **완료** |
 
 ### 병렬 구현 가능 그룹
 
@@ -190,6 +190,49 @@ graph TD
 - `@serverless-openclaw/shared` 직접 import (Vite Bundler 모듈 해석)
 - WebSocket `?token={idToken}` 쿼리 인증 (API GW $connect Authorization 헤더 미지원)
 - Plain CSS + CSS 변수 (다크/라이트 모드 자동 감지)
+
+### 1-9 Telegram 봇 상세 (완료)
+
+| 구분 | 파일 | 설명 |
+|------|------|------|
+| **서비스** | `services/telegram.ts` | Telegram Bot API sendMessage 래퍼 (fire-and-forget) |
+| **핸들러** | `handlers/telegram-webhook.ts` | cold start 감지 → "깨우는 중..." 즉시 응답 추가 |
+| **CDK** | `api-stack.ts` | `TELEGRAM_BOT_TOKEN` 환경변수 주입 |
+| **스크립트** | `scripts/setup-telegram-webhook.sh` | Webhook URL + secret token 등록 |
+
+검증 결과:
+- 단위 테스트: 99개 전체 통과 (telegram 서비스 4개 + webhook 핸들러 7개 신규/수정)
+- TypeScript 빌드: 통과
+- CDK synth: 통과
+- ESLint: 통과
+
+설계 결정:
+- Cold start 감지: `getTaskState` 결과가 null 또는 Starting이면 즉시 Telegram 응답
+- sendTelegramMessage는 fire-and-forget (실패해도 throw하지 않음 — 메시지 라우팅에 영향 없도록)
+- `TELEGRAM_BOT_TOKEN`과 `TELEGRAM_SECRET_TOKEN` 분리 (같은 Secrets Manager 시크릿이지만 용도가 다름)
+
+### 1-10 통합 테스트/문서화 상세 (완료)
+
+| 구분 | 파일 | 설명 |
+|------|------|------|
+| **배포 가이드** | `docs/deployment.md` | 사전 요구사항, 시크릿 설정, 빌드, 배포, 검증, 트러블슈팅 |
+| **개발 가이드** | `docs/development.md` | 로컬 환경, 빌드, 패키지별 개발, TDD, Git Hooks, 코딩 규칙 |
+| **E2E 테스트** | `packages/cdk/__tests__/stacks.e2e.test.ts` | 6개 CDK 스택 synth + 주요 리소스 검증 (24개 테스트) |
+| **설정** | `vitest.config.ts` | 단위 테스트에서 `*.e2e.test.ts` 제외 |
+
+검증 결과:
+- 단위 테스트: 99개 전체 통과 (기존 테스트 미파손)
+- E2E 테스트: 24개 전체 통과 (CDK synth 6개 스택)
+- TypeScript 빌드: 통과
+- ESLint: 통과
+
+E2E 테스트 범위:
+- NetworkStack: VPC, NAT Gateway 없음, 퍼블릭 서브넷 2개, VPC Gateway Endpoints, Security Group
+- StorageStack: DynamoDB 5개 (PAY_PER_REQUEST), GSI, S3, ECR
+- AuthStack: Cognito User Pool, SRP 인증, User Pool Domain
+- ComputeStack: ECS 클러스터, Fargate Task Definition (ARM64), CloudWatch Log Group
+- ApiStack: Lambda 6개 (ARM64), WebSocket API, HTTP API, EventBridge watchdog
+- WebStack: S3, CloudFront, OAC, SPA 에러 응답
 
 ---
 

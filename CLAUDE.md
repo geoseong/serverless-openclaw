@@ -82,10 +82,9 @@ packages/
 - **Fargate Public IP 조회:** DescribeTasks → ENI ID → DescribeNetworkInterfaces → PublicIp
 - **OpenClaw 프로토콜:** JSON-RPC 2.0 / MCP over WebSocket, `?token=` 쿼리 인증
 
-## Phase 1 Progress (8/10)
+## Phase 1 Progress (10/10 — 완료)
 
-완료: 1-1(프로젝트 초기화), 1-2(NetworkStack + StorageStack), 1-3(컨테이너), 1-4(Gateway Lambda), 1-5(API Gateway), 1-6(Cognito), 1-7(Compute), 1-8(웹 UI)
-다음: 1-9(Telegram), 1-10(통합 테스트)
+완료: 1-1(프로젝트 초기화), 1-2(NetworkStack + StorageStack), 1-3(컨테이너), 1-4(Gateway Lambda), 1-5(API Gateway), 1-6(Cognito), 1-7(Compute), 1-8(웹 UI), 1-9(Telegram), 1-10(통합 테스트/문서화)
 
 상세: `docs/progress.md` 참조. 구현 가이드: `/implement 1-{N}` 스킬 사용.
 
@@ -95,3 +94,5 @@ packages/
 - `docs/implementation-plan.md` — Bridge 프로토콜, 컨테이너 플로우, Telegram 전략
 - `docs/cost-optimization.md` — Fargate Spot, API Gateway vs ALB 분석
 - `docs/PRD.md` — 제품 요구사항
+- `docs/deployment.md` — AWS 배포 가이드 (시크릿, 빌드, 배포, 검증)
+- `docs/development.md` — 로컬 개발 가이드 (환경, TDD, 코딩 규칙)

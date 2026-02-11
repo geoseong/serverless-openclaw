@@ -166,8 +166,11 @@ npm install          # 의존성 설치
 npm run build        # TypeScript 빌드
 npm run lint         # ESLint 검사
 npm run format       # Prettier 포맷팅
-npm run test         # Vitest 테스트
+npm run test         # 단위 테스트 (99개)
+npm run test:e2e     # E2E 테스트 (CDK synth 24개)
 ```
+
+AWS 배포: [배포 가이드](docs/deployment.md) | 로컬 개발 상세: [개발 가이드](docs/development.md)
 
 ## 문서
 
@@ -175,6 +178,8 @@ npm run test         # Vitest 테스트
 - [아키텍처 설계](docs/architecture.md)
 - [세부 설계 및 구현 계획](docs/implementation-plan.md)
 - [비용 최적화 분석](docs/cost-optimization.md)
+- [배포 가이드](docs/deployment.md)
+- [개발 가이드](docs/development.md)
 - [프로젝트 진행 계획](docs/progress.md)
 
 ## 라이선스
