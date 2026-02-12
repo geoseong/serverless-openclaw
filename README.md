@@ -1,5 +1,12 @@
 # Serverless OpenClaw
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg)](https://www.typescriptlang.org/)
+[![AWS CDK](https://img.shields.io/badge/AWS_CDK-2.x-orange.svg)](https://aws.amazon.com/cdk/)
+[![Node.js](https://img.shields.io/badge/Node.js-22.x-green.svg)](https://nodejs.org/)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#contributing)
+[![Alpha](https://img.shields.io/badge/Status-Alpha-red.svg)](#)
+
 > **⚠️ Alpha — Development in Progress**
 >
 > This project is in an early alpha stage and has **not been fully tested** in production environments.

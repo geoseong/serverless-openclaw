@@ -53,8 +53,6 @@ export class OpenClawClient {
 
       // Gateway connect challenge — respond with connect request
       if (msg.type === "event" && msg.event === "connect.challenge") {
-        const nonce = (msg.payload?.nonce as string) ?? "";
-        const ts = (msg.payload?.ts as number) ?? Date.now();
         const connectReq = {
           type: "req",
           id: "connect-1",
@@ -78,7 +76,6 @@ export class OpenClawClient {
             userAgent: "serverless-openclaw-bridge/1.0",
           },
         };
-        console.log("[bridge] Responding to connect.challenge (nonce:", nonce, "ts:", ts, ")");
         this.ws!.send(JSON.stringify(connectReq));
         return;
       }
@@ -212,7 +209,6 @@ export class OpenClawClient {
       },
     );
 
-    console.log("[bridge] Sending chat.send, sessionKey:", this.sessionKey);
     this.ws.send(JSON.stringify(request));
 
     const payload = await responsePromise;
@@ -220,7 +216,6 @@ export class OpenClawClient {
     if (!runId) {
       throw new Error("No runId in chat.send response");
     }
-    console.log("[bridge] chat.send accepted, runId:", runId);
     this.activeRuns.set(runId, chat);
 
     // Yield chunks as they arrive
