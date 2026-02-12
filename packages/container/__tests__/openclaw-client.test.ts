@@ -143,13 +143,13 @@ describe("OpenClawClient", () => {
 
     await vi.advanceTimersByTimeAsync(0);
 
-    // Gateway streams chat delta
+    // Gateway streams agent events (cumulative text in "data" field)
     client.ws?.emit(
       "message",
       JSON.stringify({
         type: "event",
-        event: "chat",
-        payload: { runId: "run-abc", state: "delta", seq: 1, message: "Hello " },
+        event: "agent",
+        payload: { runId: "run-abc", stream: "assistant", seq: 1, data: "Hello " },
       }),
     );
 
@@ -162,8 +162,9 @@ describe("OpenClawClient", () => {
       "message",
       JSON.stringify({
         type: "event",
-        event: "chat",
-        payload: { runId: "run-abc", state: "delta", seq: 2, message: "world!" },
+        event: "agent",
+        // Cumulative: full text "Hello world!" — only delta "world!" is yielded
+        payload: { runId: "run-abc", stream: "assistant", seq: 2, data: "Hello world!" },
       }),
     );
 

@@ -46,6 +46,11 @@ export class ComputeStack extends cdk.Stack {
       "AnthropicApiKey",
       "serverless-openclaw/anthropic-api-key",
     );
+    const telegramBotToken = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      "TelegramBotToken",
+      "serverless-openclaw/telegram-bot-token",
+    );
 
     // ECS Cluster — FARGATE_SPOT only
     this.cluster = new ecs.Cluster(this, "Cluster", {
@@ -89,6 +94,7 @@ export class ComputeStack extends cdk.Stack {
         BRIDGE_AUTH_TOKEN: ecs.Secret.fromSecretsManager(bridgeAuthToken),
         OPENCLAW_GATEWAY_TOKEN: ecs.Secret.fromSecretsManager(openclawGatewayToken),
         ANTHROPIC_API_KEY: ecs.Secret.fromSecretsManager(anthropicApiKey),
+        TELEGRAM_BOT_TOKEN: ecs.Secret.fromSecretsManager(telegramBotToken),
       },
       logging: ecs.LogDrivers.awsLogs({
         logGroup,
@@ -120,6 +126,7 @@ export class ComputeStack extends cdk.Stack {
     bridgeAuthToken.grantRead(this.taskRole);
     openclawGatewayToken.grantRead(this.taskRole);
     anthropicApiKey.grantRead(this.taskRole);
+    telegramBotToken.grantRead(this.taskRole);
 
     // API Gateway @connections for pushing messages back to WebSocket clients
     this.taskRole.addToPrincipalPolicy(

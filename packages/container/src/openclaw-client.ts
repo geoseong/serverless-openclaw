@@ -7,6 +7,7 @@ interface PendingChat {
   chunks: string[];
   chunkResolve: ((value: IteratorResult<string>) => void) | null;
   chunkReject: ((reason: Error) => void) | null;
+  lastTextLength: number;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -118,26 +119,41 @@ export class OpenClawClient {
         return;
       }
 
-      // Chat streaming event
+      // Agent streaming event — carries cumulative text per token
+      if (msg.type === "event" && msg.event === "agent") {
+        const payload = msg.payload;
+        if (!payload) return;
+        const runId = (payload?.runId ?? payload?.run) as string;
+        if (!runId) return;
+        const run = this.activeRuns.get(runId);
+        if (!run) return;
+
+        if (payload.stream === "assistant" && payload.data != null) {
+          const fullText = extractTextContent(payload.data);
+          const delta = fullText.slice(run.lastTextLength);
+          run.lastTextLength = fullText.length;
+          if (delta) {
+            if (run.chunkResolve) {
+              const resolve = run.chunkResolve;
+              run.chunkResolve = null;
+              run.chunkReject = null;
+              resolve({ value: delta, done: false });
+            } else {
+              run.chunks.push(delta);
+            }
+          }
+        }
+        return;
+      }
+
+      // Chat lifecycle event — final/error/aborted (no text, just lifecycle)
       if (msg.type === "event" && msg.event === "chat") {
         const payload = msg.payload;
         const runId = payload?.runId as string;
         const run = this.activeRuns.get(runId);
         if (!run) return;
 
-        if (payload.state === "delta" && payload.message) {
-          const content = extractTextContent(payload.message);
-          if (content) {
-            if (run.chunkResolve) {
-              const resolve = run.chunkResolve;
-              run.chunkResolve = null;
-              run.chunkReject = null;
-              resolve({ value: content, done: false });
-            } else {
-              run.chunks.push(content);
-            }
-          }
-        } else if (payload.state === "final") {
+        if (payload.state === "final") {
           this.activeRuns.delete(runId);
           if (run.chunkResolve) {
             const resolve = run.chunkResolve;
@@ -195,6 +211,7 @@ export class OpenClawClient {
       chunks: [],
       chunkResolve: null,
       chunkReject: null,
+      lastTextLength: 0,
     };
 
     const completionPromise = new Promise<void>((resolve, reject) => {

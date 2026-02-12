@@ -4,20 +4,21 @@ import {
 } from "@aws-sdk/client-apigatewaymanagementapi";
 import type { ServerMessage } from "@serverless-openclaw/shared";
 
+const TELEGRAM_MAX_LENGTH = 4096;
+
 export class CallbackSender {
   private client: ApiGatewayManagementApiClient;
+  private telegramBotToken?: string;
+  private telegramBuffers = new Map<string, string[]>();
 
-  constructor(endpoint: string) {
+  constructor(endpoint: string, telegramBotToken?: string) {
     this.client = new ApiGatewayManagementApiClient({ endpoint });
+    this.telegramBotToken = telegramBotToken;
   }
 
   async send(connectionId: string, data: ServerMessage): Promise<void> {
-    // Telegram connections don't have WebSocket connectionIds — skip @connections
-    // TODO: Route Telegram responses via Telegram Bot API
     if (connectionId.startsWith("telegram:")) {
-      if (data.type === "stream_end" || data.type === "error") {
-        console.log(`[callback] Telegram response complete for ${connectionId}`);
-      }
+      await this.handleTelegram(connectionId, data);
       return;
     }
 
@@ -30,10 +31,69 @@ export class CallbackSender {
       );
     } catch (err: unknown) {
       if (err instanceof Error && err.name === "GoneException") {
-        // Client disconnected — silently ignore
         return;
       }
       throw err;
+    }
+  }
+
+  private async handleTelegram(
+    connectionId: string,
+    data: ServerMessage,
+  ): Promise<void> {
+    if (!this.telegramBotToken) return;
+
+    if (data.type === "stream_chunk" && data.content) {
+      const buffer = this.telegramBuffers.get(connectionId) ?? [];
+      buffer.push(data.content);
+      this.telegramBuffers.set(connectionId, buffer);
+      return;
+    }
+
+    if (data.type === "stream_end") {
+      const buffer = this.telegramBuffers.get(connectionId);
+      this.telegramBuffers.delete(connectionId);
+      if (buffer && buffer.length > 0) {
+        await this.sendTelegramMessage(connectionId, buffer.join(""));
+      }
+      return;
+    }
+
+    if (data.type === "error") {
+      this.telegramBuffers.delete(connectionId);
+      const text = data.error ?? data.content ?? "An error occurred";
+      await this.sendTelegramMessage(connectionId, text);
+      return;
+    }
+  }
+
+  private async sendTelegramMessage(
+    connectionId: string,
+    text: string,
+  ): Promise<void> {
+    const chatId = connectionId.slice(9); // Remove "telegram:" prefix
+    try {
+      for (let i = 0; i < text.length; i += TELEGRAM_MAX_LENGTH) {
+        const chunk = text.slice(i, i + TELEGRAM_MAX_LENGTH);
+        const resp = await fetch(
+          `https://api.telegram.org/bot${this.telegramBotToken}/sendMessage`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ chat_id: chatId, text: chunk }),
+          },
+        );
+        if (!resp.ok) {
+          console.error(
+            `[callback] Telegram API error ${resp.status} for ${connectionId}`,
+          );
+        }
+      }
+    } catch (err) {
+      console.error(
+        `[callback] Failed to send Telegram message to ${connectionId}:`,
+        err,
+      );
     }
   }
 }

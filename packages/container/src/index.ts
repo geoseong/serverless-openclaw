@@ -78,7 +78,8 @@ async function main(): Promise<void> {
   await waitForPort(18789, 120000);
 
   // Initialize components
-  const callbackSender = new CallbackSender(env.CALLBACK_URL);
+  const telegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
+  const callbackSender = new CallbackSender(env.CALLBACK_URL, telegramBotToken);
   const openclawClient = new OpenClawClient(gatewayUrl, env.OPENCLAW_GATEWAY_TOKEN);
   await openclawClient.waitForReady();
 
