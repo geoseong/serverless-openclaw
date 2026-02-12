@@ -10,14 +10,15 @@ COPY packages/shared/src/ packages/shared/src/
 COPY packages/container/package.json packages/container/tsconfig.json packages/container/
 COPY packages/container/src/ packages/container/src/
 
-RUN npm ci --workspace=packages/shared --workspace=packages/container
+RUN npm pkg delete scripts.prepare && \
+    npm ci
 RUN npm run build --workspace=packages/shared --workspace=packages/container
 
 # Stage 2: Runtime
 FROM --platform=linux/arm64 node:20-slim
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl unzip && \
+    apt-get install -y --no-install-recommends ca-certificates curl unzip && \
     curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip" -o /tmp/awscliv2.zip && \
     unzip -q /tmp/awscliv2.zip -d /tmp && \
     /tmp/aws/install && \
@@ -31,11 +32,14 @@ RUN groupadd -r openclaw && useradd -r -g openclaw -m openclaw
 
 WORKDIR /app
 
-# Copy built artifacts
-COPY --from=builder /build/packages/shared/dist/ /app/node_modules/@serverless-openclaw/shared/dist/
-COPY --from=builder /build/packages/shared/package.json /app/node_modules/@serverless-openclaw/shared/
+# Copy production dependencies (remove workspace symlink first)
+RUN mkdir -p /app/node_modules
 COPY --from=builder /build/packages/container/dist/ /app/dist/
 COPY --from=builder /build/node_modules/ /app/node_modules/
+# Overwrite workspace symlink with real shared package
+RUN rm -rf /app/node_modules/@serverless-openclaw/shared
+COPY --from=builder /build/packages/shared/dist/ /app/node_modules/@serverless-openclaw/shared/dist/
+COPY --from=builder /build/packages/shared/package.json /app/node_modules/@serverless-openclaw/shared/
 COPY packages/container/package.json /app/
 COPY packages/container/start-openclaw.sh /app/
 

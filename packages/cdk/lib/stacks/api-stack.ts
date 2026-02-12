@@ -60,6 +60,12 @@ export class ApiStack extends cdk.Stack {
       "TelegramBotToken",
       "serverless-openclaw/telegram-bot-token",
     );
+    const telegramWebhookSecretName = "serverless-openclaw/telegram-webhook-secret";
+    const telegramWebhookSecret = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      "TelegramWebhookSecret",
+      telegramWebhookSecretName,
+    );
 
     // Common environment variables for Lambda functions
     const subnetIds = props.vpc.publicSubnets.map((s) => s.subnetId).join(",");
@@ -151,7 +157,7 @@ export class ApiStack extends cdk.Stack {
     }
     telegramWebhookFn.addEnvironment(
       "TELEGRAM_SECRET_TOKEN",
-      telegramBotToken.secretValue.unsafeUnwrap(),
+      cdk.SecretValue.secretsManager(telegramWebhookSecretName).unsafeUnwrap(),
     );
     telegramWebhookFn.addEnvironment(
       "TELEGRAM_BOT_TOKEN",
@@ -218,6 +224,7 @@ export class ApiStack extends cdk.Stack {
     bridgeAuthToken.grantRead(telegramWebhookFn);
     bridgeAuthToken.grantRead(watchdogFn);
     telegramBotToken.grantRead(telegramWebhookFn);
+    telegramWebhookSecret.grantRead(telegramWebhookFn);
 
     // ── WebSocket API ──
 

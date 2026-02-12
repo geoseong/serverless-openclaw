@@ -52,7 +52,7 @@ npx cdk bootstrap aws://<ACCOUNT_ID>/$AWS_REGION
 
 ## 2. Secret Setup (Secrets Manager)
 
-Before deployment, you must manually create 3 secrets in AWS Secrets Manager.
+Before deployment, you must manually create 3 secrets in AWS Secrets Manager (5 if using Telegram).
 
 ```bash
 # Bridge auth token (for Lambda ↔ Fargate communication)
@@ -78,11 +78,31 @@ aws secretsmanager create-secret \
 
 ### When Using Telegram Bot (Optional)
 
+#### Step 1: Create a Bot via @BotFather
+
+1. Open Telegram and search for `@BotFather`
+2. Send `/newbot`
+3. Enter a display name (e.g., `My OpenClaw`)
+4. Enter a username ending with `bot` (e.g., `my_openclaw_bot`)
+5. BotFather will reply with an **HTTP API token** (e.g., `123456789:ABCdefGHI...`). Save this token.
+
+#### Step 2: Store the Token in Secrets Manager
+
 ```bash
-# Telegram Bot Token (issued by @BotFather)
 aws secretsmanager create-secret \
   --name "serverless-openclaw/telegram-bot-token" \
-  --secret-string "<YOUR_TELEGRAM_BOT_TOKEN>" \
+  --secret-string "<TOKEN_FROM_BOTFATHER>" \
+  --profile $AWS_PROFILE
+```
+
+#### Step 3: Create Webhook Secret
+
+The webhook secret is a separate random string used to verify that incoming webhook requests are from Telegram. It must **not** contain `:` characters (bot tokens are not suitable).
+
+```bash
+aws secretsmanager create-secret \
+  --name "serverless-openclaw/telegram-webhook-secret" \
+  --secret-string "$(openssl rand -hex 32)" \
   --profile $AWS_PROFILE
 ```
 
@@ -148,9 +168,8 @@ To run the Fargate container, you need to push a Docker image to ECR.
 aws ecr get-login-password --region <REGION> --profile $AWS_PROFILE \
   | docker login --username AWS --password-stdin <ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com
 
-# Build + push image
-cd packages/container
-docker build --platform linux/arm64 -t serverless-openclaw .
+# Build + push image (must run from project root — Dockerfile uses workspace context)
+docker build --platform linux/arm64 -f packages/container/Dockerfile -t serverless-openclaw .
 docker tag serverless-openclaw:latest <ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/serverless-openclaw:latest
 docker push <ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/serverless-openclaw:latest
 ```
@@ -169,6 +188,7 @@ chmod +x scripts/setup-telegram-webhook.sh
 ./scripts/setup-telegram-webhook.sh
 
 # Or manual registration
+# <TELEGRAM_SECRET_TOKEN> = value from serverless-openclaw/telegram-webhook-secret in Secrets Manager
 curl -X POST "https://api.telegram.org/bot<BOT_TOKEN>/setWebhook" \
   -H "Content-Type: application/json" \
   -d '{
@@ -268,9 +288,8 @@ cd packages/cdk && npx cdk deploy --all --profile $AWS_PROFILE
 ### Update OpenClaw Container
 
 ```bash
-# Build + push new image
-cd packages/container
-docker build --platform linux/arm64 -t serverless-openclaw .
+# Build + push new image (must run from project root)
+docker build --platform linux/arm64 -f packages/container/Dockerfile -t serverless-openclaw .
 docker tag serverless-openclaw:latest <ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/serverless-openclaw:latest
 docker push <ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/serverless-openclaw:latest
 
