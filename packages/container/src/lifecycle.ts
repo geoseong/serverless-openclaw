@@ -1,4 +1,3 @@
-import { execSync } from "node:child_process";
 import { PutCommand } from "@aws-sdk/lib-dynamodb";
 import {
   TABLE_NAMES,
@@ -6,6 +5,7 @@ import {
   PERIODIC_BACKUP_INTERVAL_MS,
 } from "@serverless-openclaw/shared";
 import type { TaskStatus } from "@serverless-openclaw/shared";
+import { backupToS3 } from "./s3-sync.js";
 
 interface LifecycleDeps {
   dynamoSend: (command: unknown) => Promise<unknown>;
@@ -57,9 +57,11 @@ export class LifecycleManager {
   }
 
   async backupToS3(): Promise<void> {
-    execSync(
-      `aws s3 sync ${this.deps.workspacePath} s3://${this.deps.s3Bucket}/${this.deps.s3Prefix} --quiet`,
-    );
+    await backupToS3({
+      bucket: this.deps.s3Bucket,
+      prefix: this.deps.s3Prefix,
+      localPath: this.deps.workspacePath,
+    });
   }
 
   startPeriodicBackup(): void {

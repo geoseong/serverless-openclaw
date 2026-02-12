@@ -18,37 +18,36 @@ RUN npm run build --workspace=packages/shared --workspace=packages/container
 FROM --platform=linux/arm64 node:22-slim
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates curl unzip git && \
-    curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip" -o /tmp/awscliv2.zip && \
-    unzip -q /tmp/awscliv2.zip -d /tmp && \
-    /tmp/aws/install && \
-    rm -rf /tmp/aws /tmp/awscliv2.zip && \
-    apt-get purge -y unzip && \
-    apt-get autoremove -y && \
+    apt-get install -y --no-install-recommends ca-certificates curl git && \
     rm -rf /var/lib/apt/lists/*
 
-# Install OpenClaw CLI
-RUN npm install -g openclaw@latest
+# Install OpenClaw CLI and clean cache
+RUN npm install -g openclaw@latest && \
+    npm cache clean --force
 
 # Create non-root user
 RUN groupadd -r openclaw && useradd -r -g openclaw -m openclaw
 
+# Pre-generate openclaw config (skip onboard at runtime)
+RUN mkdir -p /home/openclaw/.config/openclaw && \
+    echo '{"auth":{"method":"env"},"gateway":{"port":18789}}' > /home/openclaw/.config/openclaw/openclaw.json && \
+    chown -R openclaw:openclaw /home/openclaw/.config
+
 WORKDIR /app
 
-# Copy production dependencies (remove workspace symlink first)
-RUN mkdir -p /app/node_modules
-COPY --from=builder /build/packages/container/dist/ /app/dist/
-COPY --from=builder /build/node_modules/ /app/node_modules/
+# Copy production dependencies with --chown to avoid extra layer
+COPY --from=builder --chown=openclaw:openclaw /build/packages/container/dist/ /app/dist/
+COPY --from=builder --chown=openclaw:openclaw /build/node_modules/ /app/node_modules/
 # Overwrite workspace symlink with real shared package
 RUN rm -rf /app/node_modules/@serverless-openclaw/shared
-COPY --from=builder /build/packages/shared/dist/ /app/node_modules/@serverless-openclaw/shared/dist/
-COPY --from=builder /build/packages/shared/package.json /app/node_modules/@serverless-openclaw/shared/
-COPY packages/container/package.json /app/
-COPY packages/container/start-openclaw.sh /app/
+COPY --from=builder --chown=openclaw:openclaw /build/packages/shared/dist/ /app/node_modules/@serverless-openclaw/shared/dist/
+COPY --from=builder --chown=openclaw:openclaw /build/packages/shared/package.json /app/node_modules/@serverless-openclaw/shared/
+COPY --chown=openclaw:openclaw packages/container/package.json /app/
+COPY --chown=openclaw:openclaw packages/container/start-openclaw.sh /app/
 
 RUN chmod +x /app/start-openclaw.sh && \
     mkdir -p /data/workspace && \
-    chown -R openclaw:openclaw /app /data
+    chown openclaw:openclaw /data/workspace
 
 USER openclaw
 

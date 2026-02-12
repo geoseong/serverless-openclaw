@@ -164,15 +164,33 @@ npx cdk deploy WebStack --profile $AWS_PROFILE
 To run the Fargate container, you need to push a Docker image to ECR.
 
 ```bash
-# ECR login
+# Option A: Use the deploy script (recommended)
+./scripts/deploy-image.sh
+
+# Option B: Manual steps
 aws ecr get-login-password --region <REGION> --profile $AWS_PROFILE \
   | docker login --username AWS --password-stdin <ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com
 
-# Build + push image (must run from project root — Dockerfile uses workspace context)
-docker build --platform linux/arm64 -f packages/container/Dockerfile -t serverless-openclaw .
+docker build -f packages/container/Dockerfile -t serverless-openclaw .
 docker tag serverless-openclaw:latest <ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/serverless-openclaw:latest
 docker push <ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/serverless-openclaw:latest
 ```
+
+### SOCI Lazy Loading (Optional — Reduces Cold Start)
+
+SOCI (Seekable OCI) enables lazy loading of container image layers, reducing Fargate cold start by ~50%. Requires `soci` CLI (Linux only).
+
+```bash
+# Install soci CLI (Linux)
+wget https://github.com/awslabs/soci-snapshotter/releases/latest/download/soci-snapshotter-grpc-linux-amd64.tar.gz
+tar -xzf soci-snapshotter-grpc-linux-amd64.tar.gz
+sudo mv soci /usr/local/bin/
+
+# Build and push image with SOCI index
+./scripts/deploy-image.sh --soci
+```
+
+> **Note:** SOCI requires Fargate platform version 1.4.0+ (default). The SOCI index is stored alongside the image in ECR. Fargate automatically detects and uses the index for lazy loading — no task definition changes needed.
 
 ---
 
@@ -288,12 +306,13 @@ cd packages/cdk && npx cdk deploy --all --profile $AWS_PROFILE
 ### Update OpenClaw Container
 
 ```bash
-# Build + push new image (must run from project root)
-docker build --platform linux/arm64 -f packages/container/Dockerfile -t serverless-openclaw .
-docker tag serverless-openclaw:latest <ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/serverless-openclaw:latest
-docker push <ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/serverless-openclaw:latest
+# Build + push new image
+./scripts/deploy-image.sh       # without SOCI
+./scripts/deploy-image.sh --soci  # with SOCI (Linux only)
 
-# If there are running tasks, restart them (next request will launch with the new image)
+# If there are running tasks, stop them (next request will launch with the new image)
+aws ecs list-tasks --cluster serverless-openclaw --profile $AWS_PROFILE
+aws ecs stop-task --cluster serverless-openclaw --task <TASK_ID> --profile $AWS_PROFILE
 ```
 
 ### Full Teardown

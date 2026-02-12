@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { LifecycleManager } from "../src/lifecycle.js";
+import * as s3Sync from "../src/s3-sync.js";
 
 const mockDynamoSend = vi.fn();
-const mockS3Send = vi.fn();
 
 vi.mock("@aws-sdk/lib-dynamodb", () => ({
   DynamoDBDocumentClient: {
@@ -16,12 +16,9 @@ vi.mock("@aws-sdk/client-dynamodb", () => ({
   DynamoDBClient: vi.fn(() => ({})),
 }));
 
-vi.mock("@aws-sdk/client-s3", () => ({
-  S3Client: vi.fn(() => ({ send: mockS3Send })),
-}));
-
-vi.mock("node:child_process", () => ({
-  execSync: vi.fn(),
+vi.mock("../src/s3-sync.js", () => ({
+  backupToS3: vi.fn().mockResolvedValue(undefined),
+  restoreFromS3: vi.fn().mockResolvedValue(undefined),
 }));
 
 describe("LifecycleManager", () => {
@@ -31,7 +28,6 @@ describe("LifecycleManager", () => {
     vi.useFakeTimers();
     vi.clearAllMocks();
     mockDynamoSend.mockResolvedValue({});
-    mockS3Send.mockResolvedValue({});
 
     lifecycle = new LifecycleManager({
       dynamoSend: mockDynamoSend,
@@ -93,13 +89,14 @@ describe("LifecycleManager", () => {
     );
   });
 
-  it("should call S3 sync on backupToS3", async () => {
-    const { execSync } = await import("node:child_process");
+  it("should call backupToS3 with correct params", async () => {
     await lifecycle.backupToS3();
 
-    expect(execSync).toHaveBeenCalledWith(
-      expect.stringContaining("aws s3 sync"),
-    );
+    expect(s3Sync.backupToS3).toHaveBeenCalledWith({
+      bucket: "my-backup-bucket",
+      prefix: "backups/user-123",
+      localPath: "/data/workspace",
+    });
   });
 
   it("should start and stop periodic backup", async () => {
@@ -127,11 +124,12 @@ describe("LifecycleManager", () => {
   });
 
   it("should backup before shutdown", async () => {
-    const { execSync } = await import("node:child_process");
     await lifecycle.gracefulShutdown();
 
-    expect(execSync).toHaveBeenCalledWith(
-      expect.stringContaining("aws s3 sync"),
-    );
+    expect(s3Sync.backupToS3).toHaveBeenCalledWith({
+      bucket: "my-backup-bucket",
+      prefix: "backups/user-123",
+      localPath: "/data/workspace",
+    });
   });
 });

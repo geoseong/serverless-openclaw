@@ -7,6 +7,7 @@ import { CallbackSender } from "./callback-sender.js";
 import { OpenClawClient } from "./openclaw-client.js";
 import { LifecycleManager } from "./lifecycle.js";
 import { consumePendingMessages } from "./pending-messages.js";
+import { restoreFromS3 } from "./s3-sync.js";
 import type { PendingMessageItem } from "@serverless-openclaw/shared";
 
 const REQUIRED_ENV = [
@@ -59,6 +60,24 @@ function waitForPort(port: number, timeoutMs: number): Promise<void> {
   });
 }
 
+async function notifyTelegram(chatId: string, text: string): Promise<void> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return;
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text }),
+    });
+  } catch {
+    // Non-fatal — startup notifications are best-effort
+  }
+}
+
+function getTelegramChatId(userId: string): string | null {
+  return userId.startsWith("telegram:") ? userId.slice(9) : null;
+}
+
 async function main(): Promise<void> {
   // Validate required env vars
   const env = Object.fromEntries(
@@ -74,6 +93,19 @@ async function main(): Promise<void> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const dynamoSend = dynamoClient.send.bind(dynamoClient) as (cmd: any) => Promise<any>;
 
+  const chatId = getTelegramChatId(userId);
+
+  // Restore workspace from S3 (runs before gateway is ready)
+  await restoreFromS3({
+    bucket: env.DATA_BUCKET,
+    prefix: `workspaces/${userId}`,
+    localPath: "/data/workspace",
+  });
+
+  if (chatId) {
+    await notifyTelegram(chatId, "⚡ 컨테이너 시작됨. AI 엔진 연결 중...");
+  }
+
   // Wait for OpenClaw Gateway to be ready (up to 120s for cold start)
   await waitForPort(18789, 120000);
 
@@ -82,6 +114,10 @@ async function main(): Promise<void> {
   const callbackSender = new CallbackSender(env.CALLBACK_URL, telegramBotToken);
   const openclawClient = new OpenClawClient(gatewayUrl, env.OPENCLAW_GATEWAY_TOKEN);
   await openclawClient.waitForReady();
+
+  if (chatId) {
+    await notifyTelegram(chatId, "✅ 준비 완료! 메시지를 처리합니다...");
+  }
 
   const lifecycle = new LifecycleManager({
     dynamoSend,
