@@ -74,12 +74,13 @@ async function main(): Promise<void> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const dynamoSend = dynamoClient.send.bind(dynamoClient) as (cmd: any) => Promise<any>;
 
-  // Wait for OpenClaw Gateway to be ready
-  await waitForPort(18789, 60000);
+  // Wait for OpenClaw Gateway to be ready (up to 120s for cold start)
+  await waitForPort(18789, 120000);
 
   // Initialize components
   const callbackSender = new CallbackSender(env.CALLBACK_URL);
   const openclawClient = new OpenClawClient(gatewayUrl, env.OPENCLAW_GATEWAY_TOKEN);
+  await openclawClient.waitForReady();
 
   const lifecycle = new LifecycleManager({
     dynamoSend,

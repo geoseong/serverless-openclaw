@@ -1,101 +1,198 @@
 import WebSocket from "ws";
-import type {
-  JsonRpcRequest,
-  JsonRpcResponse,
-  JsonRpcNotification,
-} from "@serverless-openclaw/shared";
+import { randomUUID } from "node:crypto";
 
-interface PendingRequest {
-  resolve: (value: unknown) => void;
+interface PendingChat {
+  resolve: () => void;
   reject: (reason: Error) => void;
   chunks: string[];
   chunkResolve: ((value: IteratorResult<string>) => void) | null;
   chunkReject: ((reason: Error) => void) | null;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type ReqHandler = { resolve: (payload: any) => void; reject: (err: Error) => void };
+
 export class OpenClawClient {
   readonly gatewayUrl: string;
   ws: WebSocket | null = null;
+  private token: string;
   private nextId = 1;
-  private pending = new Map<number, PendingRequest>();
+  private sessionKey = "";
+  private pendingRequests = new Map<string, ReqHandler>();
+  private activeRuns = new Map<string, PendingChat>();
+  private readyResolve!: () => void;
+  private readyReject!: (reason: Error) => void;
+  private readyPromise: Promise<void>;
 
   constructor(baseUrl: string, token: string) {
-    const separator = baseUrl.includes("?") ? "&" : "?";
-    this.gatewayUrl = `${baseUrl}/${separator}token=${token}`;
+    this.gatewayUrl = baseUrl;
+    this.token = token;
+    this.readyPromise = new Promise<void>((resolve, reject) => {
+      this.readyResolve = resolve;
+      this.readyReject = reject;
+    });
     this.connect();
+  }
+
+  waitForReady(): Promise<void> {
+    return this.readyPromise;
   }
 
   private connect(): void {
     this.ws = new WebSocket(this.gatewayUrl);
 
-    this.ws.on("message", (raw: WebSocket.Data) => {
-      const msg = JSON.parse(raw.toString()) as
-        | JsonRpcResponse
-        | JsonRpcNotification;
+    this.ws.on("error", (err) => {
+      this.readyReject(
+        err instanceof Error ? err : new Error(String(err)),
+      );
+    });
 
-      // Stream chunk notification
-      if ("method" in msg && msg.method === "stream_chunk") {
-        const params = msg.params as { id: number; content: string };
-        const pending = this.pending.get(params.id);
+    this.ws.on("message", (raw: WebSocket.Data) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const msg = JSON.parse(raw.toString()) as any;
+
+      // Gateway connect challenge — respond with connect request
+      if (msg.type === "event" && msg.event === "connect.challenge") {
+        const nonce = (msg.payload?.nonce as string) ?? "";
+        const ts = (msg.payload?.ts as number) ?? Date.now();
+        const connectReq = {
+          type: "req",
+          id: "connect-1",
+          method: "connect",
+          params: {
+            minProtocol: 3,
+            maxProtocol: 3,
+            client: {
+              id: "gateway-client",
+              version: "1.0.0",
+              platform: "linux",
+              mode: "backend",
+            },
+            role: "operator",
+            scopes: ["operator.read", "operator.write"],
+            caps: [],
+            commands: [],
+            permissions: {},
+            auth: { token: this.token },
+            locale: "en-US",
+            userAgent: "serverless-openclaw-bridge/1.0",
+          },
+        };
+        console.log("[bridge] Responding to connect.challenge (nonce:", nonce, "ts:", ts, ")");
+        this.ws!.send(JSON.stringify(connectReq));
+        return;
+      }
+
+      // Gateway hello-ok — handshake complete
+      if (msg.type === "res" && msg.id === "connect-1" && msg.ok === true) {
+        if (msg.payload?.type === "hello-ok") {
+          this.sessionKey =
+            msg.payload?.snapshot?.sessionDefaults?.mainSessionKey ?? "main";
+          console.log(
+            "Gateway handshake complete, sessionKey:",
+            this.sessionKey,
+          );
+          this.readyResolve();
+          return;
+        }
+      }
+
+      // Gateway connect error
+      if (msg.type === "res" && msg.id === "connect-1" && msg.ok === false) {
+        this.readyReject(
+          new Error(`Gateway connect failed: ${msg.error?.message ?? JSON.stringify(msg)}`),
+        );
+        return;
+      }
+
+      // Response to a pending request (chat.send → runId)
+      if (msg.type === "res" && msg.id && msg.id !== "connect-1") {
+        const pending = this.pendingRequests.get(msg.id);
         if (pending) {
-          if (pending.chunkResolve) {
-            const resolve = pending.chunkResolve;
-            pending.chunkResolve = null;
-            pending.chunkReject = null;
-            resolve({ value: params.content, done: false });
+          this.pendingRequests.delete(msg.id);
+          if (msg.ok === true) {
+            pending.resolve(msg.payload);
           } else {
-            pending.chunks.push(params.content);
+            pending.reject(
+              new Error(msg.error?.message ?? "Request failed"),
+            );
           }
         }
         return;
       }
 
-      // JSON-RPC response (success or error) — stream end
-      if ("id" in msg) {
-        const response = msg as JsonRpcResponse;
-        const pending = this.pending.get(response.id);
-        if (pending) {
-          this.pending.delete(response.id);
-          if (response.error) {
-            const err = new Error(response.error.message);
-            if (pending.chunkReject) {
-              const reject = pending.chunkReject;
-              pending.chunkResolve = null;
-              pending.chunkReject = null;
-              reject(err);
+      // Chat streaming event
+      if (msg.type === "event" && msg.event === "chat") {
+        const payload = msg.payload;
+        const runId = payload?.runId as string;
+        const run = this.activeRuns.get(runId);
+        if (!run) return;
+
+        if (payload.state === "delta" && payload.message) {
+          const content = extractTextContent(payload.message);
+          if (content) {
+            if (run.chunkResolve) {
+              const resolve = run.chunkResolve;
+              run.chunkResolve = null;
+              run.chunkReject = null;
+              resolve({ value: content, done: false });
+            } else {
+              run.chunks.push(content);
             }
-            pending.reject(err);
-          } else {
-            if (pending.chunkResolve) {
-              const resolve = pending.chunkResolve;
-              pending.chunkResolve = null;
-              pending.chunkReject = null;
-              resolve({ value: undefined as unknown as string, done: true });
-            }
-            pending.resolve(response.result);
           }
+        } else if (payload.state === "final") {
+          this.activeRuns.delete(runId);
+          if (run.chunkResolve) {
+            const resolve = run.chunkResolve;
+            run.chunkResolve = null;
+            run.chunkReject = null;
+            resolve({ value: undefined as unknown as string, done: true });
+          }
+          run.resolve();
+        } else if (
+          payload.state === "error" ||
+          payload.state === "aborted"
+        ) {
+          this.activeRuns.delete(runId);
+          const err = new Error(
+            payload.errorMessage ?? `Chat ${payload.state}`,
+          );
+          if (run.chunkReject) {
+            const reject = run.chunkReject;
+            run.chunkResolve = null;
+            run.chunkReject = null;
+            reject(err);
+          }
+          run.reject(err);
         }
+        return;
       }
     });
   }
 
   async *sendMessage(
-    userId: string,
+    _userId: string,
     message: string,
   ): AsyncGenerator<string> {
+    await this.readyPromise;
+
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error("WebSocket not connected");
     }
 
-    const id = this.nextId++;
-    const request: JsonRpcRequest = {
-      jsonrpc: "2.0",
-      method: "sendMessage",
-      params: { userId, message },
-      id,
+    const reqId = String(this.nextId++);
+    const request = {
+      type: "req",
+      id: reqId,
+      method: "chat.send",
+      params: {
+        sessionKey: this.sessionKey,
+        message,
+        idempotencyKey: randomUUID(),
+      },
     };
 
-    const pending: PendingRequest = {
+    const chat: PendingChat = {
       resolve: () => {},
       reject: () => {},
       chunks: [],
@@ -103,30 +200,47 @@ export class OpenClawClient {
       chunkReject: null,
     };
 
-    const completionPromise = new Promise<unknown>((resolve, reject) => {
-      pending.resolve = resolve;
-      pending.reject = reject;
+    const completionPromise = new Promise<void>((resolve, reject) => {
+      chat.resolve = resolve;
+      chat.reject = reject;
     });
 
-    this.pending.set(id, pending);
+    // Wait for chat.send response to get runId
+    const responsePromise = new Promise<Record<string, unknown>>(
+      (resolve, reject) => {
+        this.pendingRequests.set(reqId, { resolve, reject });
+      },
+    );
+
+    console.log("[bridge] Sending chat.send, sessionKey:", this.sessionKey);
     this.ws.send(JSON.stringify(request));
+
+    const payload = await responsePromise;
+    const runId = payload?.runId as string;
+    if (!runId) {
+      throw new Error("No runId in chat.send response");
+    }
+    console.log("[bridge] chat.send accepted, runId:", runId);
+    this.activeRuns.set(runId, chat);
 
     // Yield chunks as they arrive
     while (true) {
-      if (pending.chunks.length > 0) {
-        yield pending.chunks.shift()!;
+      if (chat.chunks.length > 0) {
+        yield chat.chunks.shift()!;
         continue;
       }
 
-      // Wait for next chunk or completion
       const result = await Promise.race([
         new Promise<IteratorResult<string>>((resolve, reject) => {
-          pending.chunkResolve = resolve;
-          pending.chunkReject = reject;
+          chat.chunkResolve = resolve;
+          chat.chunkReject = reject;
         }),
         completionPromise.then(
-          () => ({ value: undefined as unknown as string, done: true }) as IteratorResult<string>,
-          (err) => { throw err; },
+          () =>
+            ({ value: undefined as unknown as string, done: true }) as IteratorResult<string>,
+          (err) => {
+            throw err;
+          },
         ),
       ]);
 
@@ -142,4 +256,21 @@ export class OpenClawClient {
       this.ws.close();
     }
   }
+}
+
+function extractTextContent(message: unknown): string {
+  if (typeof message === "string") return message;
+  if (message && typeof message === "object") {
+    const msg = message as Record<string, unknown>;
+    if (typeof msg.content === "string") return msg.content;
+    if (typeof msg.text === "string") return msg.text;
+    // Claude-style content blocks
+    if (Array.isArray(msg.content)) {
+      return (msg.content as Array<Record<string, unknown>>)
+        .filter((b) => b.type === "text")
+        .map((b) => b.text as string)
+        .join("");
+    }
+  }
+  return "";
 }

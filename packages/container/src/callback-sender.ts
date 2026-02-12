@@ -12,6 +12,15 @@ export class CallbackSender {
   }
 
   async send(connectionId: string, data: ServerMessage): Promise<void> {
+    // Telegram connections don't have WebSocket connectionIds — skip @connections
+    // TODO: Route Telegram responses via Telegram Bot API
+    if (connectionId.startsWith("telegram:")) {
+      if (data.type === "stream_end" || data.type === "error") {
+        console.log(`[callback] Telegram response complete for ${connectionId}`);
+      }
+      return;
+    }
+
     try {
       await this.client.send(
         new PostToConnectionCommand({

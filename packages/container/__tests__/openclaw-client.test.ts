@@ -1,9 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { OpenClawClient } from "../src/openclaw-client.js";
 
-// vi.hoisted runs before imports — can't use EventEmitter directly.
-// Instead, use __mocks__ pattern: mock ws module with a factory that
-// dynamically requires EventEmitter at runtime.
 vi.mock("ws", () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { EventEmitter } = require("node:events");
@@ -27,6 +24,39 @@ vi.mock("ws", () => {
   };
 });
 
+vi.mock("node:crypto", () => ({
+  randomUUID: () => "test-uuid-1234",
+}));
+
+/** Simulate gateway connect.challenge then hello-ok after client responds */
+function simulateHandshake(client: OpenClawClient): void {
+  // Gateway sends connect.challenge
+  client.ws?.emit(
+    "message",
+    JSON.stringify({
+      type: "event",
+      event: "connect.challenge",
+      payload: { nonce: "test-nonce", ts: 1700000000000 },
+    }),
+  );
+  // Gateway sends hello-ok after receiving connect request
+  client.ws?.emit(
+    "message",
+    JSON.stringify({
+      type: "res",
+      id: "connect-1",
+      ok: true,
+      payload: {
+        type: "hello-ok",
+        protocol: 3,
+        snapshot: {
+          sessionDefaults: { mainSessionKey: "test-session-key" },
+        },
+      },
+    }),
+  );
+}
+
 describe("OpenClawClient", () => {
   let client: OpenClawClient;
 
@@ -40,37 +70,86 @@ describe("OpenClawClient", () => {
     vi.useRealTimers();
   });
 
-  it("should connect with token in query string", () => {
-    expect(client.gatewayUrl).toBe("ws://localhost:18789/?token=test-token");
+  it("should connect without token in URL", () => {
+    expect(client.gatewayUrl).toBe("ws://localhost:18789");
   });
 
-  it("should send JSON-RPC request via sendMessage", async () => {
+  it("should respond to connect.challenge with connect request", async () => {
     await vi.advanceTimersByTimeAsync(0);
+
+    // Gateway sends challenge
+    client.ws?.emit(
+      "message",
+      JSON.stringify({
+        type: "event",
+        event: "connect.challenge",
+        payload: { nonce: "abc123", ts: 1700000000000 },
+      }),
+    );
+
+    const sendFn = client.ws?.send as ReturnType<typeof vi.fn>;
+    expect(sendFn).toHaveBeenCalledTimes(1);
+    const connectMsg = JSON.parse(sendFn.mock.calls[0][0] as string);
+    expect(connectMsg.type).toBe("req");
+    expect(connectMsg.id).toBe("connect-1");
+    expect(connectMsg.method).toBe("connect");
+    expect(connectMsg.params.client.id).toBe("gateway-client");
+    expect(connectMsg.params.client.mode).toBe("backend");
+    expect(connectMsg.params.role).toBe("operator");
+    expect(connectMsg.params.auth.token).toBe("test-token");
+    expect(connectMsg.params.minProtocol).toBe(3);
+    expect(connectMsg.params.device).toBeUndefined();
+  });
+
+  it("should resolve waitForReady on hello-ok", async () => {
+    await vi.advanceTimersByTimeAsync(0);
+    simulateHandshake(client);
+    await expect(client.waitForReady()).resolves.toBeUndefined();
+  });
+
+  it("should send chat.send request via sendMessage after handshake", async () => {
+    await vi.advanceTimersByTimeAsync(0);
+    simulateHandshake(client);
+    await client.waitForReady();
 
     const generator = client.sendMessage("user-1", "Hello");
     const resultPromise = generator.next();
 
     await vi.advanceTimersByTimeAsync(0);
 
-    expect(client.ws?.send).toHaveBeenCalledWith(
-      expect.stringContaining('"method"'),
-    );
+    const sendFn = client.ws?.send as ReturnType<typeof vi.fn>;
+    // call[0] is connect request, call[1] is chat.send
+    expect(sendFn).toHaveBeenCalledTimes(2);
+    const sentMsg = JSON.parse(sendFn.mock.calls[1][0] as string);
+    expect(sentMsg.type).toBe("req");
+    expect(sentMsg.method).toBe("chat.send");
+    expect(sentMsg.params.sessionKey).toBe("test-session-key");
+    expect(sentMsg.params.message).toBe("Hello");
+    expect(sentMsg.params.idempotencyKey).toBe("test-uuid-1234");
+    expect(typeof sentMsg.id).toBe("string");
 
-    const sentMsg = JSON.parse(
-      (client.ws?.send as ReturnType<typeof vi.fn>).mock.calls[0][0] as string,
-    );
-    expect(sentMsg.jsonrpc).toBe("2.0");
-    expect(sentMsg.method).toBe("sendMessage");
-    expect(sentMsg.params).toEqual({ userId: "user-1", message: "Hello" });
-    expect(typeof sentMsg.id).toBe("number");
+    const reqId = sentMsg.id;
 
-    const rpcId = sentMsg.id;
+    // Gateway responds with runId
     client.ws?.emit(
       "message",
       JSON.stringify({
-        jsonrpc: "2.0",
-        method: "stream_chunk",
-        params: { id: rpcId, content: "Hello " },
+        type: "res",
+        id: reqId,
+        ok: true,
+        payload: { runId: "run-abc" },
+      }),
+    );
+
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Gateway streams chat delta
+    client.ws?.emit(
+      "message",
+      JSON.stringify({
+        type: "event",
+        event: "chat",
+        payload: { runId: "run-abc", state: "delta", seq: 1, message: "Hello " },
       }),
     );
 
@@ -82,9 +161,9 @@ describe("OpenClawClient", () => {
     client.ws?.emit(
       "message",
       JSON.stringify({
-        jsonrpc: "2.0",
-        method: "stream_chunk",
-        params: { id: rpcId, content: "world!" },
+        type: "event",
+        event: "chat",
+        payload: { runId: "run-abc", state: "delta", seq: 2, message: "world!" },
       }),
     );
 
@@ -95,9 +174,9 @@ describe("OpenClawClient", () => {
     client.ws?.emit(
       "message",
       JSON.stringify({
-        jsonrpc: "2.0",
-        result: { status: "complete" },
-        id: rpcId,
+        type: "event",
+        event: "chat",
+        payload: { runId: "run-abc", state: "final", seq: 3 },
       }),
     );
 
@@ -105,27 +184,87 @@ describe("OpenClawClient", () => {
     expect(end.done).toBe(true);
   });
 
-  it("should handle error responses", async () => {
+  it("should handle chat error events", async () => {
     await vi.advanceTimersByTimeAsync(0);
+    simulateHandshake(client);
+    await client.waitForReady();
 
     const generator = client.sendMessage("user-1", "Hello");
     const resultPromise = generator.next();
     await vi.advanceTimersByTimeAsync(0);
 
-    const sentMsg = JSON.parse(
-      (client.ws?.send as ReturnType<typeof vi.fn>).mock.calls[0][0] as string,
-    );
+    const sendFn = client.ws?.send as ReturnType<typeof vi.fn>;
+    const sentMsg = JSON.parse(sendFn.mock.calls[1][0] as string);
 
+    // Gateway responds with runId
     client.ws?.emit(
       "message",
       JSON.stringify({
-        jsonrpc: "2.0",
-        error: { code: -32600, message: "Invalid request" },
+        type: "res",
         id: sentMsg.id,
+        ok: true,
+        payload: { runId: "run-err" },
       }),
     );
 
-    await expect(resultPromise).rejects.toThrow("Invalid request");
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Gateway sends error event
+    client.ws?.emit(
+      "message",
+      JSON.stringify({
+        type: "event",
+        event: "chat",
+        payload: {
+          runId: "run-err",
+          state: "error",
+          seq: 1,
+          errorMessage: "Model error",
+        },
+      }),
+    );
+
+    await expect(resultPromise).rejects.toThrow("Model error");
+  });
+
+  it("should handle chat.send request failure", async () => {
+    await vi.advanceTimersByTimeAsync(0);
+    simulateHandshake(client);
+    await client.waitForReady();
+
+    const generator = client.sendMessage("user-1", "Hello");
+    const resultPromise = generator.next();
+    await vi.advanceTimersByTimeAsync(0);
+
+    const sendFn = client.ws?.send as ReturnType<typeof vi.fn>;
+    const sentMsg = JSON.parse(sendFn.mock.calls[1][0] as string);
+
+    // Gateway rejects chat.send
+    client.ws?.emit(
+      "message",
+      JSON.stringify({
+        type: "res",
+        id: sentMsg.id,
+        ok: false,
+        error: { code: "INVALID_REQUEST", message: "Invalid session" },
+      }),
+    );
+
+    await expect(resultPromise).rejects.toThrow("Invalid session");
+  });
+
+  it("should reject waitForReady on connect error response", async () => {
+    await vi.advanceTimersByTimeAsync(0);
+    client.ws?.emit(
+      "message",
+      JSON.stringify({
+        type: "res",
+        id: "connect-1",
+        ok: false,
+        error: { code: "AUTH_FAILED", message: "bad token" },
+      }),
+    );
+    await expect(client.waitForReady()).rejects.toThrow("bad token");
   });
 
   it("should close the WebSocket connection", async () => {
