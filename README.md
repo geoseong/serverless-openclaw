@@ -1,5 +1,11 @@
 # Serverless OpenClaw
 
+> **⚠️ Alpha — Development in Progress**
+>
+> This project is in an early alpha stage and has **not been fully tested** in production environments.
+> It involves LLM API calls, which can incur **unexpected costs** and may expose **security risks** if misconfigured.
+> **Use for development and testing purposes only.** The authors are not responsible for any costs or damages arising from its use.
+
 An open-source project that runs [OpenClaw](https://github.com/openclaw/openclaw) on-demand on AWS serverless infrastructure, providing a web UI and Telegram as interfaces.
 
 Inspired by the architecture of [Cloudflare MoltWorker](https://github.com/cloudflare/moltworker), this project delivers an independent serverless solution optimized for the AWS ecosystem.
@@ -183,6 +189,62 @@ AWS deployment: [Deployment Guide](docs/deployment.md) | Local development detai
 - [Development Guide](docs/development.md)
 - [Project Progress Plan](docs/progress.md)
 - [User Guide (Quick Start)](docs/user-guide.md)
+
+## Contributing
+
+Contributions are welcome! Please read the guidelines below before submitting.
+
+### How to Contribute
+
+1. **Bug fixes and small improvements** — Submit a Pull Request directly
+2. **Major features or architecture changes** — Open a GitHub Issue first to discuss the approach
+3. **Questions** — Open a GitHub Discussion
+
+### Before Submitting a PR
+
+- Fork the repository and create a feature branch from `main`
+- Run the full build and test suite locally:
+  ```bash
+  npm run build && npm run lint && npm run test && npm run test:e2e
+  ```
+- Keep each PR focused on a **single change**
+- Provide a clear description of what changed and why
+- Ensure all CI checks pass
+
+### Development Setup
+
+```bash
+git clone https://github.com/<your-fork>/serverless-openclaw.git
+cd serverless-openclaw
+npm install
+cp .env.example .env   # Configure AWS profile
+npm run build
+npm run test            # Unit tests (99 tests)
+npm run test:e2e        # E2E tests (24 tests)
+```
+
+For detailed local development instructions, see the [Development Guide](docs/development.md).
+
+### Code Style
+
+- TypeScript strict mode with ES2022 target
+- `.js` extension required in all import paths
+- ESLint + Prettier enforced via Git hooks (pre-commit)
+- TDD required — write tests before implementation (except `packages/web`)
+
+### AI-Assisted Contributions
+
+AI-generated code is welcome. When submitting AI-assisted PRs:
+
+- Indicate in the PR title or description that AI tools were used
+- Document the testing level (untested / lightly tested / fully tested)
+- Confirm that you understand what the code does
+
+### Security Reporting
+
+If you discover a security vulnerability, please **do not** open a public issue. Instead, report it via GitHub's private vulnerability reporting feature or contact the maintainers directly.
+
+A complete report should include: severity level, affected components, reproduction steps, and suggested fixes.
 
 ## License
 
