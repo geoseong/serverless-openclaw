@@ -1,3 +1,4 @@
+import * as net from "net";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { BRIDGE_PORT } from "@serverless-openclaw/shared";
@@ -12,8 +13,7 @@ const REQUIRED_ENV = [
   "BRIDGE_AUTH_TOKEN",
   "OPENCLAW_GATEWAY_TOKEN",
   "USER_ID",
-  "TASK_ARN",
-  "S3_BUCKET",
+  "DATA_BUCKET",
   "CALLBACK_URL",
 ] as const;
 
@@ -25,12 +25,47 @@ function requireEnv(name: string): string {
   return val;
 }
 
+async function getTaskArn(): Promise<string> {
+  // Prefer env var if set, otherwise discover from ECS metadata
+  if (process.env.TASK_ARN) return process.env.TASK_ARN;
+  const metadataUri = process.env.ECS_CONTAINER_METADATA_URI_V4;
+  if (metadataUri) {
+    const resp = await fetch(`${metadataUri}/task`);
+    const data = (await resp.json()) as { TaskARN?: string };
+    if (data.TaskARN) return data.TaskARN;
+  }
+  throw new Error("Cannot determine TASK_ARN from env or ECS metadata");
+}
+
+function waitForPort(port: number, timeoutMs: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const deadline = Date.now() + timeoutMs;
+    function tryConnect(): void {
+      const sock = net.createConnection({ port, host: "127.0.0.1" });
+      sock.once("connect", () => {
+        sock.destroy();
+        resolve();
+      });
+      sock.once("error", () => {
+        sock.destroy();
+        if (Date.now() >= deadline) {
+          reject(new Error(`Port ${port} not ready after ${timeoutMs}ms`));
+        } else {
+          setTimeout(tryConnect, 500);
+        }
+      });
+    }
+    tryConnect();
+  });
+}
+
 async function main(): Promise<void> {
   // Validate required env vars
   const env = Object.fromEntries(
     REQUIRED_ENV.map((name) => [name, requireEnv(name)]),
   ) as Record<(typeof REQUIRED_ENV)[number], string>;
 
+  const taskArn = await getTaskArn();
   const userId = env.USER_ID;
   const gatewayUrl = `ws://localhost:${18789}`;
 
@@ -39,6 +74,9 @@ async function main(): Promise<void> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const dynamoSend = dynamoClient.send.bind(dynamoClient) as (cmd: any) => Promise<any>;
 
+  // Wait for OpenClaw Gateway to be ready
+  await waitForPort(18789, 60000);
+
   // Initialize components
   const callbackSender = new CallbackSender(env.CALLBACK_URL);
   const openclawClient = new OpenClawClient(gatewayUrl, env.OPENCLAW_GATEWAY_TOKEN);
@@ -46,8 +84,8 @@ async function main(): Promise<void> {
   const lifecycle = new LifecycleManager({
     dynamoSend,
     userId,
-    taskArn: env.TASK_ARN,
-    s3Bucket: env.S3_BUCKET,
+    taskArn,
+    s3Bucket: env.DATA_BUCKET,
     s3Prefix: `workspaces/${userId}`,
     workspacePath: "/data/workspace",
   });

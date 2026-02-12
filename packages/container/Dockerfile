@@ -1,5 +1,5 @@
 # Stage 1: Build
-FROM --platform=linux/arm64 node:20-slim AS builder
+FROM --platform=linux/arm64 node:22-slim AS builder
 
 WORKDIR /build
 
@@ -15,10 +15,10 @@ RUN npm pkg delete scripts.prepare && \
 RUN npm run build --workspace=packages/shared --workspace=packages/container
 
 # Stage 2: Runtime
-FROM --platform=linux/arm64 node:20-slim
+FROM --platform=linux/arm64 node:22-slim
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates curl unzip && \
+    apt-get install -y --no-install-recommends ca-certificates curl unzip git && \
     curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip" -o /tmp/awscliv2.zip && \
     unzip -q /tmp/awscliv2.zip -d /tmp && \
     /tmp/aws/install && \
@@ -26,6 +26,9 @@ RUN apt-get update && \
     apt-get purge -y unzip && \
     apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/*
+
+# Install OpenClaw CLI
+RUN npm install -g openclaw@latest
 
 # Create non-root user
 RUN groupadd -r openclaw && useradd -r -g openclaw -m openclaw

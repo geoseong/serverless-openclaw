@@ -87,8 +87,7 @@ export async function handler(event: {
       containerName: "openclaw",
       environment: [
         { name: "USER_ID", value: userId },
-        { name: "BRIDGE_AUTH_TOKEN", value: process.env.BRIDGE_AUTH_TOKEN ?? "" },
-        { name: "WEBSOCKET_CALLBACK_URL", value: process.env.WEBSOCKET_CALLBACK_URL ?? "" },
+        { name: "CALLBACK_URL", value: process.env.WEBSOCKET_CALLBACK_URL ?? "" },
       ],
     },
   });
