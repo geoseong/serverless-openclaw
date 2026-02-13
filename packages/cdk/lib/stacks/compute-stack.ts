@@ -64,7 +64,7 @@ export class ComputeStack extends cdk.Stack {
     // Fargate Task Definition — ARM64, minimal resources
     this.taskDefinition = new ecs.FargateTaskDefinition(this, "TaskDef", {
       memoryLimitMiB: 1024,
-      cpu: 256,
+      cpu: 512,
       runtimePlatform: {
         cpuArchitecture: ecs.CpuArchitecture.ARM64,
         operatingSystemFamily: ecs.OperatingSystemFamily.LINUX,
