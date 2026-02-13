@@ -62,7 +62,9 @@ export interface RouteDeps {
   startTaskParams: StartTaskParams;
 }
 
-export async function routeMessage(deps: RouteDeps): Promise<void> {
+export type RouteResult = "sent" | "queued" | "started";
+
+export async function routeMessage(deps: RouteDeps): Promise<RouteResult> {
   const taskState = await deps.getTaskState(deps.userId);
 
   if (taskState?.status === "Running" && taskState.publicIp) {
@@ -73,7 +75,7 @@ export async function routeMessage(deps: RouteDeps): Promise<void> {
       connectionId: deps.connectionId,
       callbackUrl: deps.callbackUrl,
     });
-    return;
+    return "sent";
   }
 
   // Save to pending messages
@@ -99,5 +101,8 @@ export async function routeMessage(deps: RouteDeps): Promise<void> {
       startedAt: new Date().toISOString(),
       lastActivity: new Date().toISOString(),
     });
+    return "started";
   }
+
+  return "queued";
 }

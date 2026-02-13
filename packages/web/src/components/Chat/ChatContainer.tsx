@@ -12,7 +12,7 @@ export function ChatContainer() {
   const token = session?.getIdToken().getJwtToken() ?? null;
   const { connected, messages, agentStatus, sendMessage } = useWebSocket(WS_URL, token);
 
-  const inputDisabled = agentStatus === "Starting" || connected === "disconnected";
+  const inputDisabled = connected === "disconnected";
 
   return (
     <div className="chat-container">

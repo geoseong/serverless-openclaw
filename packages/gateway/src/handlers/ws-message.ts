@@ -2,6 +2,10 @@ import type { APIGatewayProxyResultV2 } from "aws-lambda";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { ECSClient } from "@aws-sdk/client-ecs";
+import {
+  ApiGatewayManagementApiClient,
+  PostToConnectionCommand,
+} from "@aws-sdk/client-apigatewaymanagementapi";
 
 import type { ClientMessage, ServerMessage } from "@serverless-openclaw/shared";
 import { getConnection } from "../services/connections.js";
@@ -15,6 +19,22 @@ const ecs = new ECSClient({});
 const dynamoSend = ddb.send.bind(ddb) as (cmd: any) => Promise<any>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const ecsSend = ecs.send.bind(ecs) as (cmd: any) => Promise<any>;
+
+async function pushToConnection(connectionId: string, msg: ServerMessage): Promise<void> {
+  const endpoint = process.env.WEBSOCKET_CALLBACK_URL ?? "";
+  const apigw = new ApiGatewayManagementApiClient({ endpoint });
+  try {
+    await apigw.send(
+      new PostToConnectionCommand({
+        ConnectionId: connectionId,
+        Data: JSON.stringify(msg),
+      }),
+    );
+  } catch (err: unknown) {
+    if (err instanceof Error && err.name === "GoneException") return;
+    throw err;
+  }
+}
 
 export async function handler(event: {
   requestContext: { connectionId?: string };
@@ -50,7 +70,7 @@ export async function handler(event: {
   }
 
   if (msg.action === "sendMessage") {
-    await routeMessage({
+    const result = await routeMessage({
       userId,
       message: msg.message ?? "",
       channel: "web",
@@ -74,6 +94,10 @@ export async function handler(event: {
         ],
       },
     });
+
+    if (result === "started" || result === "queued") {
+      await pushToConnection(connectionId, { type: "status", status: "Starting" });
+    }
 
     return { statusCode: 200, body: JSON.stringify({ status: "processing" }) };
   }
