@@ -218,19 +218,30 @@ curl -X POST "https://api.telegram.org/bot<BOT_TOKEN>/setWebhook" \
 ### Create Cognito Test User
 
 ```bash
-# Create user
+# Using Makefile (recommended)
+make user-create EMAIL=user@example.com PASS="YourPassword1!"
+
+# Or manually
 aws cognito-idp sign-up \
   --client-id <USER_POOL_CLIENT_ID> \
   --username user@example.com \
   --password "YourPassword1!" \
+  --user-attributes Name=email,Value=user@example.com \
   --profile $AWS_PROFILE
 
-# Verify email (force confirm with admin privileges)
 aws cognito-idp admin-confirm-sign-up \
   --user-pool-id <USER_POOL_ID> \
   --username user@example.com \
   --profile $AWS_PROFILE
+
+aws cognito-idp admin-update-user-attributes \
+  --user-pool-id <USER_POOL_ID> \
+  --username user@example.com \
+  --user-attributes Name=email_verified,Value=true \
+  --profile $AWS_PROFILE
 ```
+
+> **Note:** `admin-create-user`는 SRP 인증과 호환되지 않습니다. 반드시 `sign-up` API를 사용하세요.
 
 ---
 

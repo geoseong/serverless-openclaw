@@ -2,10 +2,16 @@
   "name": "@serverless-openclaw/web",
   "version": "0.1.0",
   "private": true,
-  "scripts": { "dev": "vite", "build": "vite build", "preview": "vite preview" },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
   "dependencies": {
-    "amazon-cognito-identity-js": "^6.3.0",
     "@serverless-openclaw/shared": "*",
+    "@types/qrcode": "^1.5.6",
+    "amazon-cognito-identity-js": "^6.3.0",
+    "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

@@ -11,15 +11,51 @@ const userPool = new CognitoUserPool({
   ClientId: import.meta.env.VITE_COGNITO_CLIENT_ID,
 });
 
-export function signIn(email: string, password: string): Promise<CognitoUserSession> {
+export type SignInResult =
+  | { type: "success"; session: CognitoUserSession }
+  | { type: "mfaSetup"; user: CognitoUser; secretCode: string }
+  | { type: "mfaRequired"; user: CognitoUser };
+
+export function signIn(email: string, password: string): Promise<SignInResult> {
   const user = new CognitoUser({ Username: email, Pool: userPool });
   const authDetails = new AuthenticationDetails({ Username: email, Password: password });
 
   return new Promise((resolve, reject) => {
     user.authenticateUser(authDetails, {
-      onSuccess: (session) => resolve(session),
+      onSuccess: (session) => resolve({ type: "success", session }),
       onFailure: (err) => reject(err),
+      totpRequired: () => resolve({ type: "mfaRequired", user }),
+      mfaSetup: () => {
+        user.associateSoftwareToken({
+          associateSecretCode: (secretCode: string) => {
+            resolve({ type: "mfaSetup", user, secretCode });
+          },
+          onFailure: (err: Error) => reject(err),
+        });
+      },
     });
+  });
+}
+
+export function verifySoftwareToken(user: CognitoUser, totpCode: string): Promise<CognitoUserSession> {
+  return new Promise((resolve, reject) => {
+    user.verifySoftwareToken(totpCode, "TOTP", {
+      onSuccess: (session: CognitoUserSession) => resolve(session),
+      onFailure: (err: Error) => reject(err),
+    });
+  });
+}
+
+export function sendMFACode(user: CognitoUser, totpCode: string): Promise<CognitoUserSession> {
+  return new Promise((resolve, reject) => {
+    user.sendMFACode(
+      totpCode,
+      {
+        onSuccess: (session) => resolve(session),
+        onFailure: (err) => reject(err),
+      },
+      "SOFTWARE_TOKEN_MFA",
+    );
   });
 }
 

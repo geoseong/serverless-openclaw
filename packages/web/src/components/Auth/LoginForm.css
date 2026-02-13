@@ -76,3 +76,33 @@
   text-decoration: underline;
   font-size: inherit;
 }
+
+.mfa-setup {
+  text-align: center;
+  margin-bottom: 1rem;
+}
+
+.mfa-instruction {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+  margin-bottom: 1rem;
+}
+
+.mfa-qr {
+  display: block;
+  margin: 1rem auto;
+  border-radius: 8px;
+}
+
+.mfa-secret {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  word-break: break-all;
+}
+
+.mfa-secret code {
+  background: var(--color-bg);
+  padding: 0.125rem 0.375rem;
+  border-radius: 3px;
+  font-size: 0.75rem;
+}
