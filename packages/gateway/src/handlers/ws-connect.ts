@@ -1,23 +1,36 @@
 import type { APIGatewayProxyResultV2 } from "aws-lambda";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
+import { CognitoJwtVerifier } from "aws-jwt-verify";
 import { saveConnection } from "../services/connections.js";
 
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const dynamoSend = ddb.send.bind(ddb) as (cmd: any) => Promise<any>;
 
+const verifier = CognitoJwtVerifier.create({
+  userPoolId: process.env.USER_POOL_ID!,
+  tokenUse: "id",
+  clientId: process.env.USER_POOL_CLIENT_ID!,
+});
+
 export async function handler(event: {
-  requestContext: {
-    connectionId?: string;
-    authorizer?: { jwt?: { claims?: { sub?: string } } };
-  };
+  requestContext: { connectionId?: string };
+  queryStringParameters?: Record<string, string>;
 }): Promise<APIGatewayProxyResultV2> {
   const connectionId = event.requestContext.connectionId;
-  const userId = event.requestContext.authorizer?.jwt?.claims?.sub;
+  const token = event.queryStringParameters?.token;
 
-  if (!userId) {
-    return { statusCode: 401, body: JSON.stringify({ error: "Unauthorized" }) };
+  if (!token) {
+    return { statusCode: 401, body: JSON.stringify({ error: "Missing token" }) };
+  }
+
+  let userId: string;
+  try {
+    const payload = await verifier.verify(token);
+    userId = payload.sub;
+  } catch {
+    return { statusCode: 401, body: JSON.stringify({ error: "Invalid token" }) };
   }
 
   await saveConnection(dynamoSend, connectionId!, userId);

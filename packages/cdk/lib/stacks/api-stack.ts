@@ -112,7 +112,11 @@ export class ApiStack extends cdk.Stack {
       functionName: "serverless-openclaw-ws-connect",
       entry: path.join(handlersDir, "ws-connect.ts"),
       handler: "handler",
-      environment: { ...commonEnv },
+      environment: {
+        ...commonEnv,
+        USER_POOL_ID: props.userPool.userPoolId,
+        USER_POOL_CLIENT_ID: props.userPoolClient.userPoolClientId,
+      },
     });
 
     const wsDisconnectFn = new NodejsFunction(this, "WsDisconnectFn", {
