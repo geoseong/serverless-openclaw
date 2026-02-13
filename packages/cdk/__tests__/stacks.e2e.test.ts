@@ -170,7 +170,7 @@ describe("CDK Stacks E2E — synth all stacks", () => {
           CpuArchitecture: "ARM64",
           OperatingSystemFamily: "LINUX",
         },
-        Cpu: "256",
+        Cpu: "512",
         Memory: "1024",
       });
     });

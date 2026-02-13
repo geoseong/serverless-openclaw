@@ -130,6 +130,20 @@ export class ComputeStack extends cdk.Stack {
     anthropicApiKey.grantRead(this.taskRole);
     telegramBotToken.grantRead(this.taskRole);
 
+    // ECS + EC2 permissions for public IP self-discovery
+    this.taskRole.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: ["ecs:DescribeTasks"],
+        resources: ["*"],
+      }),
+    );
+    this.taskRole.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: ["ec2:DescribeNetworkInterfaces"],
+        resources: ["*"],
+      }),
+    );
+
     // API Gateway @connections for pushing messages back to WebSocket clients
     this.taskRole.addToPrincipalPolicy(
       new iam.PolicyStatement({
