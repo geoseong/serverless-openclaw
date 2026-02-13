@@ -13,7 +13,7 @@ CLUSTER    := serverless-openclaw
 
 .PHONY: help build test lint deploy-all deploy-web deploy-image deploy-image-soci \
         user-create user-password user-list user-delete \
-        task-list task-stop task-logs task-clean \
+        task-list task-status task-stop task-logs task-clean \
         telegram-webhook telegram-status \
         web-build web-upload cf-invalidate \
         status teardown
@@ -145,6 +145,29 @@ task-list: ## List running ECS tasks
 	@aws ecs list-tasks --cluster $(CLUSTER) \
 		--profile $(AWS_PROFILE) --region $(AWS_REGION) \
 		--query "taskArns" --output table 2>/dev/null || echo "No tasks running"
+
+task-status: ## Show detailed Fargate container status
+	@TASKS=$$(aws ecs list-tasks --cluster $(CLUSTER) \
+		--profile $(AWS_PROFILE) --region $(AWS_REGION) \
+		--query "taskArns[]" --output text 2>/dev/null); \
+	if [ -z "$$TASKS" ]; then \
+		echo "No running tasks"; \
+	else \
+		aws ecs describe-tasks --cluster $(CLUSTER) --tasks $$TASKS \
+			--profile $(AWS_PROFILE) --region $(AWS_REGION) \
+			--query "tasks[].{TaskArn:taskArn,Status:lastStatus,Health:healthStatus,StartedAt:startedAt,StoppedReason:stoppedReason,CPU:cpu,Memory:memory}" \
+			--output table; \
+		echo ""; \
+		ENI=$$(aws ecs describe-tasks --cluster $(CLUSTER) --tasks $$TASKS \
+			--profile $(AWS_PROFILE) --region $(AWS_REGION) \
+			--query "tasks[0].attachments[0].details[?name=='networkInterfaceId'].value" --output text 2>/dev/null); \
+		if [ -n "$$ENI" ] && [ "$$ENI" != "None" ]; then \
+			IP=$$(aws ec2 describe-network-interfaces --network-interface-ids $$ENI \
+				--profile $(AWS_PROFILE) --region $(AWS_REGION) \
+				--query "NetworkInterfaces[0].Association.PublicIp" --output text 2>/dev/null); \
+			echo "Public IP: $$IP"; \
+		fi; \
+	fi
 
 task-stop: ## Stop all running ECS tasks
 	@for task in $$(aws ecs list-tasks --cluster $(CLUSTER) \
