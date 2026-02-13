@@ -7,6 +7,10 @@ build/
 cdk.out/
 *.js.map
 *.d.ts.map
+*.tsbuildinfo
+
+# Tools
+.omc/
 
 # Environment
 .env
