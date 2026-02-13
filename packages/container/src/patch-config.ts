@@ -12,9 +12,10 @@ export function patchConfig(configPath: string, options?: PatchOptions): void {
   // Set gateway port
   config.gateway = { ...config.gateway, port: GATEWAY_PORT };
 
-  // Set auth to env-based (no secrets in config)
-  config.auth = { ...config.auth, method: "env" };
-  delete config.auth.token;
+  // Remove auth secrets from config (API keys delivered via env vars only)
+  if (config.auth) {
+    delete config.auth.token;
+  }
 
   // Remove Telegram section entirely (webhook-only, configured via env)
   delete config.telegram;

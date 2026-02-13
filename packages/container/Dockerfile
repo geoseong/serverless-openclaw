@@ -29,9 +29,9 @@ RUN npm install -g openclaw@latest && \
 RUN groupadd -r openclaw && useradd -r -g openclaw -m openclaw
 
 # Pre-generate openclaw config (skip onboard at runtime)
-RUN mkdir -p /home/openclaw/.config/openclaw && \
-    echo '{"auth":{"method":"env"},"gateway":{"port":18789}}' > /home/openclaw/.config/openclaw/openclaw.json && \
-    chown -R openclaw:openclaw /home/openclaw/.config
+RUN mkdir -p /home/openclaw/.openclaw && \
+    echo '{"gateway":{"port":18789,"mode":"local"}}' > /home/openclaw/.openclaw/openclaw.json && \
+    chown -R openclaw:openclaw /home/openclaw/.openclaw
 
 WORKDIR /app
 

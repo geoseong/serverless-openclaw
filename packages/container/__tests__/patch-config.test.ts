@@ -31,7 +31,7 @@ describe("patchConfig", () => {
     expect(written.gateway.port).toBe(18789);
   });
 
-  it("should set auth method to env", () => {
+  it("should remove auth token", () => {
     mockedFs.readFileSync.mockReturnValue(JSON.stringify(BASE_CONFIG));
     mockedFs.writeFileSync.mockImplementation(() => {});
 
@@ -40,7 +40,7 @@ describe("patchConfig", () => {
     const written = JSON.parse(
       mockedFs.writeFileSync.mock.calls[0][1] as string,
     );
-    expect(written.auth.method).toBe("env");
+    expect(written.auth.token).toBeUndefined();
   });
 
   it("should remove secrets (token, apiKey, botToken)", () => {
@@ -85,14 +85,14 @@ describe("patchConfig", () => {
     mockedFs.readFileSync.mockReturnValue(JSON.stringify(BASE_CONFIG));
     mockedFs.writeFileSync.mockImplementation(() => {});
 
-    patchConfig("/home/openclaw/.config/openclaw.json");
+    patchConfig("/home/openclaw/.openclaw/openclaw.json");
 
     expect(mockedFs.readFileSync).toHaveBeenCalledWith(
-      "/home/openclaw/.config/openclaw.json",
+      "/home/openclaw/.openclaw/openclaw.json",
       "utf-8",
     );
     expect(mockedFs.writeFileSync).toHaveBeenCalledWith(
-      "/home/openclaw/.config/openclaw.json",
+      "/home/openclaw/.openclaw/openclaw.json",
       expect.any(String),
       "utf-8",
     );
@@ -109,6 +109,5 @@ describe("patchConfig", () => {
       mockedFs.writeFileSync.mock.calls[0][1] as string,
     );
     expect(written.gateway.port).toBe(18789);
-    expect(written.auth.method).toBe("env");
   });
 });
