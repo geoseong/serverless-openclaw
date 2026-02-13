@@ -1,6 +1,6 @@
 import express from "express";
 import { createAuthMiddleware } from "./auth-middleware.js";
-import type { BridgeMessageRequest, ServerMessage } from "@serverless-openclaw/shared";
+import type { BridgeMessageRequest, ServerMessage, Channel } from "@serverless-openclaw/shared";
 
 export interface BridgeDeps {
   authToken: string;
@@ -17,6 +17,8 @@ export interface BridgeDeps {
     updateLastActivity(): void;
     lastActivityTime: Date;
   };
+  onMessageComplete?: (userId: string, userMsg: string, assistantMsg: string, channel: Channel) => Promise<void>;
+  getAndClearHistoryPrefix?: () => string;
 }
 
 const startTime = Date.now();
@@ -47,11 +49,15 @@ export function createApp(deps: BridgeDeps): express.Express {
     // Fire-and-forget async processing
     void (async () => {
       try {
+        const prefix = deps.getAndClearHistoryPrefix?.() ?? "";
+        const messageToSend = prefix ? prefix + body.message! : body.message!;
         const generator = deps.openclawClient.sendMessage(
           body.userId!,
-          body.message!,
+          messageToSend,
         );
+        let fullResponse = "";
         for await (const chunk of generator) {
+          fullResponse += chunk;
           await deps.callbackSender.send(body.connectionId!, {
             type: "stream_chunk",
             content: chunk,
@@ -61,6 +67,16 @@ export function createApp(deps: BridgeDeps): express.Express {
         await deps.callbackSender.send(body.connectionId!, {
           type: "stream_end",
         });
+
+        // Save conversation to DynamoDB
+        if (deps.onMessageComplete && fullResponse) {
+          await deps.onMessageComplete(
+            body.userId!,
+            body.message!,
+            fullResponse,
+            body.channel! as "web" | "telegram",
+          ).catch(() => {});
+        }
       } catch (err) {
         await deps.callbackSender.send(body.connectionId!, {
           type: "error",

@@ -1,6 +1,8 @@
 import * as net from "net";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
+import { ECSClient } from "@aws-sdk/client-ecs";
+import { EC2Client } from "@aws-sdk/client-ec2";
 import { BRIDGE_PORT } from "@serverless-openclaw/shared";
 import { createApp } from "./bridge.js";
 import { CallbackSender } from "./callback-sender.js";
@@ -8,7 +10,13 @@ import { OpenClawClient } from "./openclaw-client.js";
 import { LifecycleManager } from "./lifecycle.js";
 import { consumePendingMessages } from "./pending-messages.js";
 import { restoreFromS3 } from "./s3-sync.js";
-import type { PendingMessageItem } from "@serverless-openclaw/shared";
+import { discoverPublicIp } from "./discover-public-ip.js";
+import {
+  saveMessagePair,
+  loadRecentHistory,
+  formatHistoryContext,
+} from "./conversation-store.js";
+import type { PendingMessageItem, Channel } from "@serverless-openclaw/shared";
 
 const REQUIRED_ENV = [
   "BRIDGE_AUTH_TOKEN",
@@ -26,16 +34,25 @@ function requireEnv(name: string): string {
   return val;
 }
 
-async function getTaskArn(): Promise<string> {
-  // Prefer env var if set, otherwise discover from ECS metadata
-  if (process.env.TASK_ARN) return process.env.TASK_ARN;
+interface TaskMetadata {
+  taskArn: string;
+  cluster: string;
+}
+
+async function getTaskMetadata(): Promise<TaskMetadata> {
+  // Prefer env vars if set, otherwise discover from ECS metadata
+  if (process.env.TASK_ARN && process.env.CLUSTER_ARN) {
+    return { taskArn: process.env.TASK_ARN, cluster: process.env.CLUSTER_ARN };
+  }
   const metadataUri = process.env.ECS_CONTAINER_METADATA_URI_V4;
   if (metadataUri) {
     const resp = await fetch(`${metadataUri}/task`);
-    const data = (await resp.json()) as { TaskARN?: string };
-    if (data.TaskARN) return data.TaskARN;
+    const data = (await resp.json()) as { TaskARN?: string; Cluster?: string };
+    if (data.TaskARN && data.Cluster) {
+      return { taskArn: data.TaskARN, cluster: data.Cluster };
+    }
   }
-  throw new Error("Cannot determine TASK_ARN from env or ECS metadata");
+  throw new Error("Cannot determine task metadata from env or ECS metadata");
 }
 
 function waitForPort(port: number, timeoutMs: number): Promise<void> {
@@ -84,7 +101,7 @@ async function main(): Promise<void> {
     REQUIRED_ENV.map((name) => [name, requireEnv(name)]),
   ) as Record<(typeof REQUIRED_ENV)[number], string>;
 
-  const taskArn = await getTaskArn();
+  const { taskArn, cluster } = await getTaskMetadata();
   const userId = env.USER_ID;
   const gatewayUrl = `ws://localhost:${18789}`;
 
@@ -92,6 +109,12 @@ async function main(): Promise<void> {
   const dynamoClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const dynamoSend = dynamoClient.send.bind(dynamoClient) as (cmd: any) => Promise<any>;
+  const ecsClient = new ECSClient({});
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ecsSend = ecsClient.send.bind(ecsClient) as (cmd: any) => Promise<any>;
+  const ec2Client = new EC2Client({});
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ec2Send = ec2Client.send.bind(ec2Client) as (cmd: any) => Promise<any>;
 
   const chatId = getTelegramChatId(userId);
 
@@ -131,28 +154,55 @@ async function main(): Promise<void> {
   // Update state to Starting
   await lifecycle.updateTaskState("Starting");
 
+  // Load conversation history for context continuity across cold starts
+  const history = await loadRecentHistory(dynamoSend, userId);
+  let historyPrefix = formatHistoryContext(history);
+  if (historyPrefix) {
+    console.log(`Loaded ${history.length} previous messages for context`);
+  }
+
   // Create and start Bridge server
   const app = createApp({
     authToken: env.BRIDGE_AUTH_TOKEN,
     openclawClient,
     callbackSender,
     lifecycle,
+    onMessageComplete: async (uid: string, userMsg: string, assistantMsg: string, channel: Channel) => {
+      await saveMessagePair(dynamoSend, uid, userMsg, assistantMsg, channel);
+    },
+    getAndClearHistoryPrefix: () => {
+      const prefix = historyPrefix;
+      historyPrefix = "";
+      return prefix;
+    },
   });
 
   const server = app.listen(BRIDGE_PORT, "0.0.0.0", () => {
     console.log(`Bridge server listening on port ${BRIDGE_PORT}`);
   });
 
-  // Update state to Running
-  await lifecycle.updateTaskState("Running");
+  // Discover public IP for message routing
+  const publicIp = await discoverPublicIp(ecsSend, ec2Send, cluster, taskArn);
+  console.log(`Public IP: ${publicIp ?? "not available"}`);
+
+  // Update state to Running with public IP
+  await lifecycle.updateTaskState("Running", publicIp ?? undefined);
 
   // Consume pending messages queued during cold start
   const consumed = await consumePendingMessages({
     dynamoSend,
     userId,
     processMessage: async (msg: PendingMessageItem) => {
-      const generator = openclawClient.sendMessage(userId, msg.message);
+      // Prepend history context to the first message for continuity
+      const messageToSend = historyPrefix
+        ? historyPrefix + msg.message
+        : msg.message;
+      historyPrefix = ""; // Only prepend once
+
+      const generator = openclawClient.sendMessage(userId, messageToSend);
+      let fullResponse = "";
       for await (const chunk of generator) {
+        fullResponse += chunk;
         await callbackSender.send(msg.connectionId, {
           type: "stream_chunk",
           content: chunk,
@@ -161,6 +211,11 @@ async function main(): Promise<void> {
       await callbackSender.send(msg.connectionId, {
         type: "stream_end",
       });
+
+      // Save conversation
+      if (fullResponse) {
+        await saveMessagePair(dynamoSend, userId, msg.message, fullResponse, msg.channel).catch(() => {});
+      }
     },
   });
 

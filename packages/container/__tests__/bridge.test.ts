@@ -83,7 +83,7 @@ describe("Bridge HTTP Server", () => {
     });
 
     it("should call openclawClient.sendMessage asynchronously", async () => {
-      await request(app)
+      const res = await request(app)
         .post("/message")
         .set("Authorization", "Bearer test-secret-token")
         .send({
@@ -94,12 +94,15 @@ describe("Bridge HTTP Server", () => {
           callbackUrl: "https://example.com/prod",
         });
 
-      // Give async processing a tick to start
-      await new Promise((r) => setTimeout(r, 50));
-      expect(deps.openclawClient.sendMessage).toHaveBeenCalledWith(
-        "user-1",
-        "Hello",
-      );
+      expect(res.status).toBe(202);
+
+      // Wait for async processing to complete
+      await vi.waitFor(() => {
+        expect(deps.openclawClient.sendMessage).toHaveBeenCalledWith(
+          "user-1",
+          "Hello",
+        );
+      });
     });
 
     it("should update lastActivity on message", async () => {
