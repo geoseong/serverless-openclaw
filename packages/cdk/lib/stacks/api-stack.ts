@@ -2,9 +2,9 @@ import * as path from "path";
 import * as cdk from "aws-cdk-lib";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
-import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as cognito from "aws-cdk-lib/aws-cognito";
 import * as iam from "aws-cdk-lib/aws-iam";
+import * as ssm from "aws-cdk-lib/aws-ssm";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as events from "aws-cdk-lib/aws-events";
 import * as targets from "aws-cdk-lib/aws-events-targets";
@@ -23,6 +23,7 @@ import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import type { Construct } from "constructs";
 import { WATCHDOG_INTERVAL_MINUTES } from "@serverless-openclaw/shared";
+import { SSM_PARAMS } from "./ssm-params.js";
 
 export interface ApiStackProps extends cdk.StackProps {
   vpc: ec2.IVpc;
@@ -34,8 +35,6 @@ export interface ApiStackProps extends cdk.StackProps {
   pendingMessagesTable: dynamodb.ITable;
   userPool: cognito.IUserPool;
   userPoolClient: cognito.IUserPoolClient;
-  cluster: ecs.ICluster;
-  taskDefinition: ecs.FargateTaskDefinition;
 }
 
 export class ApiStack extends cdk.Stack {
@@ -67,6 +66,12 @@ export class ApiStack extends cdk.Stack {
       telegramWebhookSecretName,
     );
 
+    // Read compute resources from SSM (decoupled from ComputeStack)
+    const taskDefArn = ssm.StringParameter.valueForStringParameter(this, SSM_PARAMS.TASK_DEFINITION_ARN);
+    const taskRoleArn = ssm.StringParameter.valueForStringParameter(this, SSM_PARAMS.TASK_ROLE_ARN);
+    const executionRoleArn = ssm.StringParameter.valueForStringParameter(this, SSM_PARAMS.EXECUTION_ROLE_ARN);
+    const clusterArn = ssm.StringParameter.valueForStringParameter(this, SSM_PARAMS.CLUSTER_ARN);
+
     // Common environment variables for Lambda functions
     const subnetIds = props.vpc.publicSubnets.map((s) => s.subnetId).join(",");
     const securityGroupIds = props.fargateSecurityGroup.securityGroupId;
@@ -77,8 +82,8 @@ export class ApiStack extends cdk.Stack {
       TASK_STATE_TABLE: props.taskStateTable.tableName,
       CONNECTIONS_TABLE: props.connectionsTable.tableName,
       PENDING_MESSAGES_TABLE: props.pendingMessagesTable.tableName,
-      ECS_CLUSTER_ARN: props.cluster.clusterArn,
-      TASK_DEFINITION_ARN: props.taskDefinition.taskDefinitionArn,
+      ECS_CLUSTER_ARN: clusterArn,
+      TASK_DEFINITION_ARN: taskDefArn,
       SUBNET_IDS: subnetIds,
       SECURITY_GROUP_IDS: securityGroupIds,
     };
@@ -212,8 +217,8 @@ export class ApiStack extends cdk.Stack {
         new iam.PolicyStatement({
           actions: ["iam:PassRole"],
           resources: [
-            props.taskDefinition.taskRole.roleArn,
-            props.taskDefinition.executionRole!.roleArn,
+            taskRoleArn,
+            executionRoleArn,
           ],
         }),
       );

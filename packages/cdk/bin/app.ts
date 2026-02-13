@@ -33,6 +33,7 @@ const compute = new ComputeStack(app, "ComputeStack", {
 });
 
 // Step 1-5: API Gateway + Lambda
+// Note: compute resources (TaskDef, Cluster ARNs) read from SSM to avoid cross-stack export issues
 const api = new ApiStack(app, "ApiStack", {
   vpc: network.vpc,
   fargateSecurityGroup: network.fargateSecurityGroup,
@@ -43,9 +44,8 @@ const api = new ApiStack(app, "ApiStack", {
   pendingMessagesTable: storage.pendingMessagesTable,
   userPool: auth.userPool,
   userPoolClient: auth.userPoolClient,
-  cluster: compute.cluster,
-  taskDefinition: compute.taskDefinition,
 });
+api.addDependency(compute);
 
 // Step 1-8: Web UI (S3 + CloudFront)
 new WebStack(app, "WebStack", {

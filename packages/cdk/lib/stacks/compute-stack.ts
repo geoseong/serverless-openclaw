@@ -6,9 +6,11 @@ import * as iam from "aws-cdk-lib/aws-iam";
 import * as logs from "aws-cdk-lib/aws-logs";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as s3 from "aws-cdk-lib/aws-s3";
+import * as ssm from "aws-cdk-lib/aws-ssm";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import type { Construct } from "constructs";
 import { BRIDGE_PORT, TABLE_NAMES } from "@serverless-openclaw/shared";
+import { SSM_PARAMS } from "./ssm-params.js";
 
 export interface ComputeStackProps extends cdk.StackProps {
   vpc: ec2.IVpc;
@@ -135,6 +137,24 @@ export class ComputeStack extends cdk.Stack {
         resources: ["*"],
       }),
     );
+
+    // SSM Parameters for cross-stack decoupling
+    new ssm.StringParameter(this, "TaskDefArnParam", {
+      parameterName: SSM_PARAMS.TASK_DEFINITION_ARN,
+      stringValue: this.taskDefinition.taskDefinitionArn,
+    });
+    new ssm.StringParameter(this, "TaskRoleArnParam", {
+      parameterName: SSM_PARAMS.TASK_ROLE_ARN,
+      stringValue: this.taskRole.roleArn,
+    });
+    new ssm.StringParameter(this, "ExecutionRoleArnParam", {
+      parameterName: SSM_PARAMS.EXECUTION_ROLE_ARN,
+      stringValue: this.taskDefinition.executionRole!.roleArn,
+    });
+    new ssm.StringParameter(this, "ClusterArnParam", {
+      parameterName: SSM_PARAMS.CLUSTER_ARN,
+      stringValue: this.cluster.clusterArn,
+    });
 
     // Outputs
     new cdk.CfnOutput(this, "ClusterArn", { value: this.cluster.clusterArn });
