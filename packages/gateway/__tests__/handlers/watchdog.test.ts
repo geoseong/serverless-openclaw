@@ -18,6 +18,7 @@ vi.mock("@aws-sdk/client-dynamodb", () => ({
 vi.mock("@aws-sdk/client-ecs", () => ({
   ECSClient: vi.fn(() => ({ send: mockEcsSend })),
   StopTaskCommand: vi.fn((params: unknown) => ({ input: params, _tag: "StopTaskCommand" })),
+  DescribeTasksCommand: vi.fn((params: unknown) => ({ input: params, _tag: "DescribeTasksCommand" })),
 }));
 
 describe("watchdog handler", () => {
@@ -107,5 +108,62 @@ describe("watchdog handler", () => {
     await handler();
 
     expect(mockEcsSend).not.toHaveBeenCalled();
+  });
+
+  it("should clean up stale Starting entries when ECS task is stopped", async () => {
+    const { handler } = await import("../../src/handlers/watchdog.js");
+
+    const staleTime = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+    mockDynamoSend.mockResolvedValueOnce({
+      Items: [
+        {
+          PK: "USER#user-1",
+          taskArn: "arn:task-stale",
+          status: "Starting",
+          startedAt: staleTime,
+          lastActivity: staleTime,
+        },
+      ],
+    });
+    // DescribeTasksCommand returns STOPPED
+    mockEcsSend.mockResolvedValueOnce({
+      tasks: [{ lastStatus: "STOPPED" }],
+    });
+    mockDynamoSend.mockResolvedValue({});
+
+    await handler();
+
+    // Should delete the stale TaskState entry
+    expect(mockDynamoSend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          TableName: expect.stringContaining("TaskState"),
+          Key: { PK: "USER#user-1" },
+        }),
+      }),
+    );
+  });
+
+  it("should not clean up Starting entries younger than 10 minutes", async () => {
+    const { handler } = await import("../../src/handlers/watchdog.js");
+
+    const recentTime = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    mockDynamoSend.mockResolvedValueOnce({
+      Items: [
+        {
+          PK: "USER#user-1",
+          taskArn: "arn:task-recent",
+          status: "Starting",
+          startedAt: recentTime,
+          lastActivity: recentTime,
+        },
+      ],
+    });
+
+    await handler();
+
+    // Should not call DescribeTasks or Delete
+    expect(mockEcsSend).not.toHaveBeenCalled();
+    expect(mockDynamoSend).toHaveBeenCalledTimes(1); // only the scan
   });
 });

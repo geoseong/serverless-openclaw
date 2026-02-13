@@ -1,6 +1,6 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, ScanCommand, DeleteCommand } from "@aws-sdk/lib-dynamodb";
-import { ECSClient, StopTaskCommand } from "@aws-sdk/client-ecs";
+import { ECSClient, StopTaskCommand, DescribeTasksCommand } from "@aws-sdk/client-ecs";
 import {
   TABLE_NAMES,
   INACTIVITY_TIMEOUT_MS,
@@ -11,16 +11,19 @@ import type { TaskStateItem } from "@serverless-openclaw/shared";
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const ecs = new ECSClient({});
 
+const STALE_STARTING_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+
 export async function handler(): Promise<void> {
   const cluster = process.env.ECS_CLUSTER_ARN ?? "";
   const now = Date.now();
 
+  // Scan all active TaskState items (Running or Starting)
   const result = (await ddb.send(
     new ScanCommand({
       TableName: TABLE_NAMES.TASK_STATE,
-      FilterExpression: "#s = :running",
+      FilterExpression: "#s IN (:running, :starting)",
       ExpressionAttributeNames: { "#s": "status" },
-      ExpressionAttributeValues: { ":running": "Running" },
+      ExpressionAttributeValues: { ":running": "Running", ":starting": "Starting" },
     }),
   )) as { Items?: TaskStateItem[] };
 
@@ -31,7 +34,31 @@ export async function handler(): Promise<void> {
     const lastActivity = new Date(item.lastActivity).getTime();
     const uptimeMs = now - startedAt;
 
-    // Don't stop tasks that haven't been running long enough
+    if (item.status === "Starting") {
+      // Clean up stale "Starting" entries — task may have failed to start
+      if (uptimeMs > STALE_STARTING_TIMEOUT_MS) {
+        // Verify the ECS task is actually stopped
+        try {
+          const desc = await ecs.send(
+            new DescribeTasksCommand({ cluster, tasks: [item.taskArn] }),
+          );
+          const task = desc.tasks?.[0];
+          if (!task || task.lastStatus === "STOPPED") {
+            await ddb.send(
+              new DeleteCommand({ TableName: TABLE_NAMES.TASK_STATE, Key: { PK: item.PK } }),
+            );
+          }
+        } catch {
+          // Task not found — clean up the stale entry
+          await ddb.send(
+            new DeleteCommand({ TableName: TABLE_NAMES.TASK_STATE, Key: { PK: item.PK } }),
+          );
+        }
+      }
+      continue;
+    }
+
+    // Running tasks: don't stop if uptime is too short
     if (uptimeMs < MIN_UPTIME_MINUTES * 60 * 1000) {
       continue;
     }
