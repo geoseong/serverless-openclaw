@@ -54,7 +54,10 @@ export function createApp(deps: BridgeDeps): express.Express {
     void (async () => {
       const msgStart = Date.now();
       try {
-        const prefix = deps.getAndClearHistoryPrefix?.() ?? "";
+        let prefix = deps.getAndClearHistoryPrefix?.() ?? "";
+        if (body.channel === "telegram") {
+          prefix += "[System: 마크다운 서식(**bold**, *italic*, ```code``` 등)을 사용하지 말고 순수 텍스트로 응답하세요.]\n";
+        }
         const messageToSend = prefix ? prefix + body.message! : body.message!;
         const generator = deps.openclawClient.sendMessage(
           body.userId!,
