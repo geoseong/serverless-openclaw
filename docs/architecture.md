@@ -425,9 +425,17 @@ User settings and system configuration.
 | SK | Example Value | Description |
 |----|--------|------|
 | `SETTING#llm_provider` | `{ provider: "anthropic", model: "claude-sonnet-4-5-20250929" }` | LLM provider |
-| `SETTING#telegram` | `{ telegramUserId: "123456", paired: true }` | Telegram pairing |
 | `SETTING#timeout` | `{ minutes: 15 }` | Inactivity timeout |
 | `SETTING#skills` | `{ enabled: ["browser", "calendar"] }` | Enabled skills |
+
+**Identity Linking Keys (OTP + 양방향 링크):**
+
+| PK | SK | Value | TTL | Description |
+|----|----|----|-----|------|
+| `USER#{cognitoId}` | `SETTING#telegram-otp` | `{ code: "123456" }` | 5분 | OTP 코드 (Web에서 생성) |
+| `USER#otp:123456` | `SETTING#otp-owner` | `{ cognitoUserId: "abc" }` | 5분 | OTP 역조회 (Telegram `/link` 시 사용) |
+| `USER#{cognitoId}` | `SETTING#linked-telegram` | `{ telegramUserId: "67890" }` | — | 정방향 링크 (Cognito → Telegram) |
+| `USER#telegram:67890` | `SETTING#linked-cognito` | `{ cognitoUserId: "abc" }` | — | 역방향 링크 (Telegram → Cognito) |
 
 ### 5.3 TaskState Table
 
@@ -529,13 +537,13 @@ interface ServerMessage {
 | Method | Path | Lambda | Auth | Description |
 |--------|------|--------|------|------|
 | POST | `/telegram` | telegram-webhook | Telegram secret | Telegram webhook |
-| GET | `/api/conversations` | api-handler | Cognito JWT | Conversation list |
-| GET | `/api/conversations/{id}` | api-handler | Cognito JWT | Conversation details |
-| GET | `/api/settings` | api-handler | Cognito JWT | Settings query |
-| PUT | `/api/settings` | api-handler | Cognito JWT | Settings update |
-| GET | `/api/status` | api-handler | Cognito JWT | Container status |
-| POST | `/api/container/start` | api-handler | Cognito JWT | Manual start |
-| POST | `/api/container/stop` | api-handler | Cognito JWT | Manual stop |
+| GET | `/conversations` | api-handler | Cognito JWT | Conversation list |
+| GET | `/status` | api-handler | Cognito JWT | Container status |
+| POST | `/link/generate-otp` | api-handler | Cognito JWT | Telegram 연동용 6자리 OTP 생성 |
+| GET | `/link/status` | api-handler | Cognito JWT | 현재 연동 상태 조회 |
+| POST | `/link/unlink` | api-handler | Cognito JWT | Telegram 연동 해제 |
+
+**CORS 설정:** HTTP API에 `corsPreflight` 적용 (`allowOrigins: ["*"]`, `allowHeaders: [Authorization, Content-Type]`). Web(CloudFront) → API Gateway 크로스 오리진 호출 허용.
 
 ### 6.3 Cognito Authorizer
 
@@ -740,7 +748,53 @@ All API paths enforce that authenticated users can only access their own resourc
 
 > **Principle**: userId is always determined server-side (via JWT or connectionId reverse lookup). Never trust userId sent by the client.
 
-### 7.9 Secrets Never Written to Disk Principle
+### 7.9 Telegram-Web Identity Linking
+
+같은 사용자가 Web(Cognito UUID)과 Telegram(`telegram:{fromId}`)을 사용할 때, 하나의 컨테이너를 공유하기 위한 OTP 기반 계정 연동.
+
+**연동 흐름:**
+
+```mermaid
+sequenceDiagram
+    participant W as Web UI
+    participant API as API Gateway
+    participant L as Lambda (api-handler)
+    participant DDB as DynamoDB (Settings)
+    participant TG as Telegram Bot
+    participant TW as Lambda (telegram-webhook)
+
+    W->>API: POST /link/generate-otp (JWT)
+    API->>L: Invoke
+    L->>DDB: PutCommand (OTP + 역조회 레코드, TTL 5분)
+    L-->>W: { code: "123456" }
+    W-->>W: 카운트다운 타이머 표시 (5:00)
+
+    TG->>API: POST /telegram (/link 123456)
+    API->>TW: Invoke
+    TW->>DDB: DeleteCommand (OTP 역조회, atomic claim)
+    TW->>DDB: GetCommand (TaskState — Telegram 컨테이너 실행 중 확인)
+    TW->>DDB: PutCommand (양방향 링크 레코드 2개)
+    TW-->>TG: "계정 연동 완료!"
+```
+
+**메시지 라우팅 (연동 후):**
+
+1. Telegram 메시지 도착 → `telegram-webhook` Lambda
+2. `resolveUserId(dynamoSend, "telegram:67890")` → Settings 테이블에서 `linked-cognito` 조회
+3. 링크 존재 → Cognito UUID 반환 → 이 userId로 `routeMessage()` 호출
+4. TaskState(`USER#{cognitoId}`)의 컨테이너로 라우팅 → Web과 동일한 컨테이너 공유
+
+**보안:**
+
+| 위협 | 방어 |
+|------|------|
+| OTP 무차별 대입 | 6자리 × 5분 TTL × API Gateway 스로틀링 |
+| 무인가 OTP 생성 | Cognito JWT 인증 필수 |
+| Telegram 사칭 | Telegram API가 `from.id` 검증 (webhook secret token) |
+| IDOR (타인 연동 해제) | 연동 해제는 Web(Cognito JWT)에서만 가능, Telegram `/unlink` 불가 |
+| 연동 시 컨테이너 충돌 | Telegram 컨테이너 실행 중이면 링크 거부 |
+
+### 7.10 Secrets Never Written to Disk Principle
 
 Ensures that API keys, tokens, and other secrets are never written to the container filesystem.
 

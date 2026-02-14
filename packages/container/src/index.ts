@@ -17,7 +17,7 @@ import {
   formatHistoryContext,
 } from "./conversation-store.js";
 import type { PendingMessageItem, Channel } from "@serverless-openclaw/shared";
-import { publishStartupMetrics } from "./metrics.js";
+import { publishStartupMetrics, publishMessageMetrics } from "./metrics.js";
 
 const REQUIRED_ENV = [
   "BRIDGE_AUTH_TOKEN",
@@ -201,6 +201,8 @@ async function main(): Promise<void> {
     dynamoSend,
     userId,
     processMessage: async (msg: PendingMessageItem) => {
+      const msgStart = new Date(msg.createdAt).getTime();
+
       // Prepend history context to the first message for continuity
       const messageToSend = historyPrefix
         ? historyPrefix + msg.message
@@ -218,6 +220,13 @@ async function main(): Promise<void> {
       }
       await callbackSender.send(msg.connectionId, {
         type: "stream_end",
+      });
+
+      // Publish message metrics (includes cold start wait time)
+      void publishMessageMetrics({
+        latency: Date.now() - msgStart,
+        responseLength: fullResponse.length,
+        channel: msg.channel,
       });
 
       // Save conversation

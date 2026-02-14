@@ -117,6 +117,14 @@ graph TD
 | **1-9** | Telegram bot | Webhook registration, secret token verification, message routing, cold start response, Bot API sendMessage | Telegram message → response received | **Complete** |
 | **1-10** | Integration tests/docs | E2E tests, deployment.md, development.md | `cdk deploy --all` succeeds on a clean AWS account | **Complete** |
 
+### Post-Phase 1 Enhancements
+
+| Enhancement | Description | Status |
+|-------------|-------------|--------|
+| **Cold Start Optimization** | Docker 이미지 2.22GB→1.27GB (43% 감소), AWS CLI 제거, chown 최적화, SOCI lazy loading | **Complete** |
+| **CloudWatch Monitoring** | 8 커스텀 메트릭, MonitoringStack 대시보드 5행 | **Complete** |
+| **Telegram-Web Identity Linking** | OTP 기반 계정 연동 (Settings 테이블), resolveUserId, REST API 3개, Web UI 설정 페이지, CORS 설정 | **Complete** |
+
 ### Parallel Implementation Groups
 
 Work groups that can be maximally parallelized based on dependencies:

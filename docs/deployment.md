@@ -294,6 +294,14 @@ wscat -c "<WebSocketApiEndpoint>?token=<ID_TOKEN>"
 2. Verify "Waking up..." response (cold start)
 3. Verify agent response
 
+### Telegram-Web Identity Linking Test
+
+1. Web UI → Settings → "Telegram 연동" 클릭 → 6자리 코드 확인 (5분 카운트다운)
+2. Telegram 봇에 `/link {코드}` 전송 → "계정 연동 완료!" 응답 확인
+3. Web UI → Settings → "Telegram ID {id} 연동됨" 표시 확인
+4. Telegram 메시지 전송 → Web과 동일한 컨테이너로 라우팅 확인 (TaskState PK가 Cognito UUID)
+5. (선택) Web UI → "연동 해제" → Telegram 메시지가 별도 컨테이너로 라우팅되는지 확인
+
 ### Check ECS Task Status
 
 ```bash

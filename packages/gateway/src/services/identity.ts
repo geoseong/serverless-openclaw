@@ -80,37 +80,28 @@ export async function verifyOtpAndLink(
   telegramUserId: string,
   code: string,
 ): Promise<{ cognitoUserId: string } | { error: string }> {
-  // 1. Atomically claim OTP (prevents race condition with concurrent /link)
-  let cognitoUserId: string;
-  try {
-    const otpResult = (await send(
-      new DeleteCommand({
-        TableName: TABLE_NAMES.SETTINGS,
-        Key: {
-          PK: `${KEY_PREFIX.USER}otp:${code}`,
-          SK: `${KEY_PREFIX.SETTING}otp-owner`,
-        },
-        ConditionExpression: "attribute_exists(PK)",
-        ReturnValues: "ALL_OLD",
-      }),
-    )) as { Attributes?: Record<string, unknown> };
-
-    const otpOwner = otpResult.Attributes?.value as
-      | { cognitoUserId: string }
-      | undefined;
-    if (!otpOwner) {
-      return { error: "OTP가 만료되었거나 유효하지 않습니다." };
-    }
-    cognitoUserId = otpOwner.cognitoUserId;
-  } catch (err: unknown) {
-    if ((err as { name?: string }).name === "ConditionalCheckFailedException") {
-      return { error: "OTP가 만료되었거나 유효하지 않습니다." };
-    }
-    throw err;
-  }
   const telegramKey = `telegram:${telegramUserId}`;
 
-  // 2. Check if telegram user has a running container
+  // 1. Look up OTP (non-destructive) to find cognitoUserId
+  const otpLookup = (await send(
+    new GetCommand({
+      TableName: TABLE_NAMES.SETTINGS,
+      Key: {
+        PK: `${KEY_PREFIX.USER}otp:${code}`,
+        SK: `${KEY_PREFIX.SETTING}otp-owner`,
+      },
+    }),
+  )) as GetResult;
+
+  const otpOwner = otpLookup.Item?.value as
+    | { cognitoUserId: string }
+    | undefined;
+  if (!otpOwner) {
+    return { error: "OTP가 만료되었거나 유효하지 않습니다." };
+  }
+  const cognitoUserId = otpOwner.cognitoUserId;
+
+  // 2. Check if telegram user has a running container (before consuming OTP)
   const taskResult = (await send(
     new GetCommand({
       TableName: TABLE_NAMES.TASK_STATE,
@@ -148,7 +139,26 @@ export async function verifyOtpAndLink(
     };
   }
 
-  // 4. Create bilateral links
+  // 4. Atomically consume OTP (prevents race condition with concurrent /link)
+  try {
+    await send(
+      new DeleteCommand({
+        TableName: TABLE_NAMES.SETTINGS,
+        Key: {
+          PK: `${KEY_PREFIX.USER}otp:${code}`,
+          SK: `${KEY_PREFIX.SETTING}otp-owner`,
+        },
+        ConditionExpression: "attribute_exists(PK)",
+      }),
+    );
+  } catch (err: unknown) {
+    if ((err as { name?: string }).name === "ConditionalCheckFailedException") {
+      return { error: "OTP가 만료되었거나 유효하지 않습니다." };
+    }
+    throw err;
+  }
+
+  // 6. Create bilateral links
   await send(
     new PutCommand({
       TableName: TABLE_NAMES.SETTINGS,
@@ -171,7 +181,7 @@ export async function verifyOtpAndLink(
     }),
   );
 
-  // 5. Clean up remaining OTP record (reverse lookup already deleted atomically in step 1)
+  // 7. Clean up remaining OTP record (reverse lookup already deleted in step 4)
   await send(
     new DeleteCommand({
       TableName: TABLE_NAMES.SETTINGS,

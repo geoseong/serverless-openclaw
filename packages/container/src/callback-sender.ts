@@ -6,6 +6,26 @@ import type { ServerMessage } from "@serverless-openclaw/shared";
 
 const TELEGRAM_MAX_LENGTH = 4096;
 
+function stripMarkdown(text: string): string {
+  return text
+    // Code blocks (```...```)
+    .replace(/```[\s\S]*?```/g, (m) => m.slice(3, -3).trim())
+    // Inline code (`...`)
+    .replace(/`([^`]+)`/g, "$1")
+    // Bold (**...**  or __...__)
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/__(.+?)__/g, "$1")
+    // Italic (*...* or _..._)
+    .replace(/(?<!\w)\*([^*]+)\*(?!\w)/g, "$1")
+    .replace(/(?<!\w)_([^_]+)_(?!\w)/g, "$1")
+    // Strikethrough (~~...~~)
+    .replace(/~~(.+?)~~/g, "$1")
+    // Links [text](url) → text (url)
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1 ($2)")
+    // Heading markers (# ## ### etc.)
+    .replace(/^#{1,6}\s+/gm, "");
+}
+
 export class CallbackSender {
   private client: ApiGatewayManagementApiClient;
   private telegramBotToken?: string;
@@ -72,9 +92,10 @@ export class CallbackSender {
     text: string,
   ): Promise<void> {
     const chatId = connectionId.slice(9); // Remove "telegram:" prefix
+    const plain = stripMarkdown(text);
     try {
-      for (let i = 0; i < text.length; i += TELEGRAM_MAX_LENGTH) {
-        const chunk = text.slice(i, i + TELEGRAM_MAX_LENGTH);
+      for (let i = 0; i < plain.length; i += TELEGRAM_MAX_LENGTH) {
+        const chunk = plain.slice(i, i + TELEGRAM_MAX_LENGTH);
         const resp = await fetch(
           `https://api.telegram.org/bot${this.telegramBotToken}/sendMessage`,
           {

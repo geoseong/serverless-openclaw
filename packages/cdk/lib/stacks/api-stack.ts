@@ -13,6 +13,7 @@ import {
   WebSocketStage,
   HttpApi,
   HttpMethod,
+  CorsHttpMethod,
 } from "aws-cdk-lib/aws-apigatewayv2";
 import {
   WebSocketLambdaIntegration,
@@ -283,6 +284,11 @@ export class ApiStack extends cdk.Stack {
 
     this.httpApi = new HttpApi(this, "HttpApi", {
       apiName: "serverless-openclaw-http",
+      corsPreflight: {
+        allowOrigins: ["*"],
+        allowMethods: [CorsHttpMethod.GET, CorsHttpMethod.POST, CorsHttpMethod.OPTIONS],
+        allowHeaders: ["Authorization", "Content-Type"],
+      },
     });
 
     // POST /telegram — no authorizer (Telegram secret token verified in Lambda)

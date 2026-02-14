@@ -89,28 +89,31 @@ describe("identity service", () => {
 
   describe("verifyOtpAndLink", () => {
     it("should link successfully with valid OTP", async () => {
-      // 1. Atomic OTP claim (DeleteCommand with ReturnValues) → found
+      // 1. OTP lookup (GetCommand) → found
       mockSend.mockResolvedValueOnce({
-        Attributes: { value: { cognitoUserId: "cognito-abc" } },
+        Item: { value: { cognitoUserId: "cognito-abc" } },
       });
       // 2. TaskState check for telegram user → no running container
       mockSend.mockResolvedValueOnce({ Item: undefined });
       // 3. Check existing link for telegram user → not linked
       mockSend.mockResolvedValueOnce({ Item: undefined });
-      // 4-5. Two PutCommand for bilateral links
+      // 4. Atomic OTP consumption (DeleteCommand with ConditionExpression)
+      mockSend.mockResolvedValueOnce({});
+      // 5-6. Two PutCommand for bilateral links
       mockSend.mockResolvedValueOnce({});
       mockSend.mockResolvedValueOnce({});
-      // 6. DeleteCommand for user's OTP record (reverse lookup already deleted in step 1)
+      // 7. DeleteCommand for user's OTP record
       mockSend.mockResolvedValueOnce({});
 
       const result = await verifyOtpAndLink(mockSend, "67890", "123456");
 
       expect(result).toEqual({ cognitoUserId: "cognito-abc" });
-      expect(mockSend).toHaveBeenCalledTimes(6);
+      expect(mockSend).toHaveBeenCalledTimes(7);
     });
 
-    it("should return error for expired/invalid OTP (no Attributes)", async () => {
-      mockSend.mockResolvedValueOnce({ Attributes: undefined });
+    it("should return error for expired/invalid OTP", async () => {
+      // OTP lookup → not found
+      mockSend.mockResolvedValueOnce({ Item: undefined });
 
       const result = await verifyOtpAndLink(mockSend, "67890", "000000");
 
@@ -119,6 +122,15 @@ describe("identity service", () => {
     });
 
     it("should return error for already-consumed OTP (ConditionalCheckFailedException)", async () => {
+      // OTP lookup → found
+      mockSend.mockResolvedValueOnce({
+        Item: { value: { cognitoUserId: "cognito-abc" } },
+      });
+      // TaskState → no container
+      mockSend.mockResolvedValueOnce({ Item: undefined });
+      // No existing link
+      mockSend.mockResolvedValueOnce({ Item: undefined });
+      // Atomic delete fails (another /link consumed it first)
       const err = new Error("Condition not met");
       (err as unknown as { name: string }).name = "ConditionalCheckFailedException";
       mockSend.mockRejectedValueOnce(err);
@@ -126,13 +138,13 @@ describe("identity service", () => {
       const result = await verifyOtpAndLink(mockSend, "67890", "123456");
 
       expect(result).toEqual({ error: "OTP가 만료되었거나 유효하지 않습니다." });
-      expect(mockSend).toHaveBeenCalledTimes(1);
+      expect(mockSend).toHaveBeenCalledTimes(4);
     });
 
-    it("should return error when telegram container is running", async () => {
-      // OTP found
+    it("should return error when telegram container is running without consuming OTP", async () => {
+      // OTP lookup → found
       mockSend.mockResolvedValueOnce({
-        Attributes: { value: { cognitoUserId: "cognito-abc" } },
+        Item: { value: { cognitoUserId: "cognito-abc" } },
       });
       // TaskState → running container
       mockSend.mockResolvedValueOnce({
@@ -144,12 +156,14 @@ describe("identity service", () => {
       expect(result).toEqual({
         error: "Telegram 컨테이너가 실행 중입니다. 약 15분 후 다시 시도해주세요.",
       });
+      // Only 2 calls: OTP lookup + TaskState check. OTP NOT consumed.
+      expect(mockSend).toHaveBeenCalledTimes(2);
     });
 
-    it("should return error when telegram is already linked to another account", async () => {
-      // OTP found
+    it("should return error when telegram is already linked to another account without consuming OTP", async () => {
+      // OTP lookup → found
       mockSend.mockResolvedValueOnce({
-        Attributes: { value: { cognitoUserId: "cognito-abc" } },
+        Item: { value: { cognitoUserId: "cognito-abc" } },
       });
       // TaskState → no container
       mockSend.mockResolvedValueOnce({ Item: undefined });
@@ -163,12 +177,14 @@ describe("identity service", () => {
       expect(result).toEqual({
         error: "이 Telegram 계정은 이미 다른 계정에 연동되어 있습니다.",
       });
+      // Only 3 calls: OTP lookup + TaskState + existing link. OTP NOT consumed.
+      expect(mockSend).toHaveBeenCalledTimes(3);
     });
 
     it("should allow re-linking to same cognito account", async () => {
-      // OTP found
+      // OTP lookup → found
       mockSend.mockResolvedValueOnce({
-        Attributes: { value: { cognitoUserId: "cognito-abc" } },
+        Item: { value: { cognitoUserId: "cognito-abc" } },
       });
       // TaskState → no container
       mockSend.mockResolvedValueOnce({ Item: undefined });
@@ -176,6 +192,8 @@ describe("identity service", () => {
       mockSend.mockResolvedValueOnce({
         Item: { value: { cognitoUserId: "cognito-abc" } },
       });
+      // Atomic OTP consumption
+      mockSend.mockResolvedValueOnce({});
       // Put bilateral links
       mockSend.mockResolvedValueOnce({});
       mockSend.mockResolvedValueOnce({});
@@ -187,10 +205,12 @@ describe("identity service", () => {
       expect(result).toEqual({ cognitoUserId: "cognito-abc" });
     });
 
-    it("should return error when Starting container exists", async () => {
+    it("should return error when Starting container exists without consuming OTP", async () => {
+      // OTP lookup → found
       mockSend.mockResolvedValueOnce({
-        Attributes: { value: { cognitoUserId: "cognito-abc" } },
+        Item: { value: { cognitoUserId: "cognito-abc" } },
       });
+      // TaskState → starting container
       mockSend.mockResolvedValueOnce({
         Item: { status: "Starting", PK: "USER#telegram:67890" },
       });
@@ -200,6 +220,8 @@ describe("identity service", () => {
       expect(result).toEqual({
         error: "Telegram 컨테이너가 실행 중입니다. 약 15분 후 다시 시도해주세요.",
       });
+      // OTP NOT consumed
+      expect(mockSend).toHaveBeenCalledTimes(2);
     });
   });
 
