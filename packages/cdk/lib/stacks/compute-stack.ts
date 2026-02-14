@@ -91,6 +91,7 @@ export class ComputeStack extends cdk.Stack {
         PENDING_MESSAGES_TABLE: TABLE_NAMES.PENDING_MESSAGES,
         DATA_BUCKET: props.dataBucket.bucketName,
         BRIDGE_PORT: String(BRIDGE_PORT),
+        METRICS_ENABLED: "true",
       },
       secrets: {
         BRIDGE_AUTH_TOKEN: ecs.Secret.fromSecretsManager(bridgeAuthToken),
@@ -129,6 +130,14 @@ export class ComputeStack extends cdk.Stack {
     openclawGatewayToken.grantRead(this.taskRole);
     anthropicApiKey.grantRead(this.taskRole);
     telegramBotToken.grantRead(this.taskRole);
+
+    // CloudWatch metrics publishing
+    this.taskRole.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: ["cloudwatch:PutMetricData"],
+        resources: ["*"],
+      }),
+    );
 
     // ECS + EC2 permissions for public IP self-discovery
     this.taskRole.addToPrincipalPolicy(

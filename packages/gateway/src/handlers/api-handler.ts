@@ -3,6 +3,7 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { getConversations } from "../services/conversations.js";
 import { getTaskState } from "../services/task-state.js";
+import { generateOtp, getLinkStatus, unlinkTelegram } from "../services/identity.js";
 
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -40,6 +41,33 @@ export async function handler(event: {
       statusCode: 200,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(state ?? { status: "idle" }),
+    };
+  }
+
+  if (method === "POST" && path === "/link/generate-otp") {
+    const code = await generateOtp(dynamoSend, userId);
+    return {
+      statusCode: 200,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code }),
+    };
+  }
+
+  if (method === "GET" && path === "/link/status") {
+    const status = await getLinkStatus(dynamoSend, userId);
+    return {
+      statusCode: 200,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(status),
+    };
+  }
+
+  if (method === "POST" && path === "/link/unlink") {
+    await unlinkTelegram(dynamoSend, userId);
+    return {
+      statusCode: 200,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ success: true }),
     };
   }
 

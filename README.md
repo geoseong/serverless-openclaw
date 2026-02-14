@@ -21,7 +21,7 @@ Inspired by the architecture of [Cloudflare MoltWorker](https://github.com/cloud
 
 - **Serverless On-demand Execution**: Minimizes cost (~$1/month) by running containers only when requested, powered by ECS Fargate Spot
 - **Web Chat UI**: Real-time chat interface built with React SPA (hosted on S3 + CloudFront)
-- **Telegram Bot Integration**: Chat with the AI agent from anywhere via Telegram
+- **Telegram Bot Integration**: Chat with the AI agent from anywhere via Telegram, with Web-Telegram identity linking for container sharing
 - **Multi-LLM Support**: Choose your preferred LLM provider — Claude, GPT, DeepSeek, and more
 - **Task Automation**: Automate various tasks through OpenClaw skills
 - **One-command Deployment**: Deploy the entire infrastructure with a single `cdk deploy`
@@ -180,8 +180,8 @@ cp .env.example .env # Configure AWS profile (edit .env)
 npm run build        # TypeScript build
 npm run lint         # ESLint check
 npm run format       # Prettier formatting
-npm run test         # Unit tests (99 tests)
-npm run test:e2e     # E2E tests (CDK synth, 24 tests)
+npm run test         # Unit tests (164 tests)
+npm run test:e2e     # E2E tests (CDK synth, 26 tests)
 ```
 
 AWS deployment: [Deployment Guide](docs/deployment.md) | Local development details: [Development Guide](docs/development.md)

@@ -1,0 +1,67 @@
+.telegram-link {
+  padding: 1.5rem;
+}
+
+.telegram-link__title {
+  margin: 0 0 1rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.telegram-link__error {
+  color: var(--color-error);
+  font-size: 0.875rem;
+  margin-bottom: 0.75rem;
+}
+
+.telegram-link__linked p {
+  margin: 0 0 0.75rem;
+  font-size: 0.875rem;
+}
+
+.telegram-link__otp-code {
+  font-size: 2rem;
+  font-weight: 700;
+  font-family: monospace;
+  letter-spacing: 0.25em;
+  text-align: center;
+  margin: 0 0 0.5rem;
+}
+
+.telegram-link__otp-guide {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+  margin: 0 0 1rem;
+  text-align: center;
+}
+
+.telegram-link__otp-guide code {
+  background: var(--color-surface-alt);
+  padding: 0.125rem 0.375rem;
+  border-radius: 3px;
+  font-size: 0.8125rem;
+}
+
+.telegram-link__btn {
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.telegram-link__btn:hover {
+  background: var(--color-border);
+}
+
+.telegram-link__btn--danger {
+  border-color: var(--color-error);
+  color: var(--color-error);
+}
+
+.telegram-link__btn--danger:hover {
+  background: var(--color-error);
+  color: #fff;
+}

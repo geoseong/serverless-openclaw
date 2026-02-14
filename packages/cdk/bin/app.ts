@@ -8,6 +8,7 @@ import {
   ComputeStack,
   ApiStack,
   WebStack,
+  MonitoringStack,
 } from "../lib/stacks/index.js";
 
 const app = new cdk.App();
@@ -54,5 +55,8 @@ new WebStack(app, "WebStack", {
   userPoolId: auth.userPool.userPoolId,
   userPoolClientId: auth.userPoolClient.userPoolClientId,
 });
+
+// Monitoring Dashboard
+new MonitoringStack(app, "MonitoringStack");
 
 app.synth();

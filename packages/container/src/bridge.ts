@@ -1,5 +1,6 @@
 import express from "express";
 import { createAuthMiddleware } from "./auth-middleware.js";
+import { publishMessageMetrics, publishFirstResponseTime } from "./metrics.js";
 import type { BridgeMessageRequest, ServerMessage, Channel } from "@serverless-openclaw/shared";
 
 export interface BridgeDeps {
@@ -17,6 +18,8 @@ export interface BridgeDeps {
     updateLastActivity(): void;
     lastActivityTime: Date;
   };
+  processStartTime: number;
+  channel: string;
   onMessageComplete?: (userId: string, userMsg: string, assistantMsg: string, channel: Channel) => Promise<void>;
   getAndClearHistoryPrefix?: () => string;
 }
@@ -25,6 +28,7 @@ const startTime = Date.now();
 
 export function createApp(deps: BridgeDeps): express.Express {
   const app = express();
+  let firstResponseSent = false;
 
   app.use(express.json());
   app.use(createAuthMiddleware(deps.authToken));
@@ -48,6 +52,7 @@ export function createApp(deps: BridgeDeps): express.Express {
 
     // Fire-and-forget async processing
     void (async () => {
+      const msgStart = Date.now();
       try {
         const prefix = deps.getAndClearHistoryPrefix?.() ?? "";
         const messageToSend = prefix ? prefix + body.message! : body.message!;
@@ -67,6 +72,19 @@ export function createApp(deps: BridgeDeps): express.Express {
         await deps.callbackSender.send(body.connectionId!, {
           type: "stream_end",
         });
+
+        // Publish message metrics
+        const latency = Date.now() - msgStart;
+        void publishMessageMetrics({
+          latency,
+          responseLength: fullResponse.length,
+          channel: deps.channel,
+        });
+
+        if (!firstResponseSent) {
+          firstResponseSent = true;
+          void publishFirstResponseTime(Date.now() - deps.processStartTime, deps.channel);
+        }
 
         // Save conversation to DynamoDB
         if (deps.onMessageComplete && fullResponse) {

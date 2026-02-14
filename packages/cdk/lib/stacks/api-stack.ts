@@ -308,6 +308,30 @@ export class ApiStack extends cdk.Stack {
       authorizer: jwtAuthorizer,
     });
 
+    // POST /link/generate-otp — Cognito JWT
+    this.httpApi.addRoutes({
+      path: "/link/generate-otp",
+      methods: [HttpMethod.POST],
+      integration: new HttpLambdaIntegration("LinkGenerateOtpInteg", apiHandlerFn),
+      authorizer: jwtAuthorizer,
+    });
+
+    // GET /link/status — Cognito JWT
+    this.httpApi.addRoutes({
+      path: "/link/status",
+      methods: [HttpMethod.GET],
+      integration: new HttpLambdaIntegration("LinkStatusInteg", apiHandlerFn),
+      authorizer: jwtAuthorizer,
+    });
+
+    // POST /link/unlink — Cognito JWT
+    this.httpApi.addRoutes({
+      path: "/link/unlink",
+      methods: [HttpMethod.POST],
+      integration: new HttpLambdaIntegration("LinkUnlinkInteg", apiHandlerFn),
+      authorizer: jwtAuthorizer,
+    });
+
     // ── EventBridge Rule — Watchdog ──
 
     new events.Rule(this, "WatchdogRule", {

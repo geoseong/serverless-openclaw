@@ -3,6 +3,11 @@ import request from "supertest";
 import { createApp } from "../src/bridge.js";
 import type { BridgeDeps } from "../src/bridge.js";
 
+vi.mock("../src/metrics.js", () => ({
+  publishMessageMetrics: vi.fn().mockResolvedValue(undefined),
+  publishFirstResponseTime: vi.fn().mockResolvedValue(undefined),
+}));
+
 function createMockDeps(): BridgeDeps {
   return {
     authToken: "test-secret-token",
@@ -22,6 +27,8 @@ function createMockDeps(): BridgeDeps {
       updateLastActivity: vi.fn(),
       lastActivityTime: new Date(),
     },
+    processStartTime: Date.now(),
+    channel: "web",
   };
 }
 

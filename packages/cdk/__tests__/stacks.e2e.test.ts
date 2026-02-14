@@ -8,6 +8,7 @@ import {
   ComputeStack,
   ApiStack,
   WebStack,
+  MonitoringStack,
 } from "../lib/stacks/index.js";
 
 describe("CDK Stacks E2E — synth all stacks", () => {
@@ -18,6 +19,7 @@ describe("CDK Stacks E2E — synth all stacks", () => {
   let computeTemplate: Template;
   let apiTemplate: Template;
   let webTemplate: Template;
+  let monitoringTemplate: Template;
 
   beforeAll(() => {
     app = new cdk.App();
@@ -65,12 +67,16 @@ describe("CDK Stacks E2E — synth all stacks", () => {
       userPoolClientId: "testclientid",
     });
 
+    // Monitoring Dashboard
+    const monitoring = new MonitoringStack(app, "TestMonitoringStack");
+
     networkTemplate = Template.fromStack(network);
     storageTemplate = Template.fromStack(storage);
     authTemplate = Template.fromStack(auth);
     computeTemplate = Template.fromStack(compute);
     apiTemplate = Template.fromStack(api);
     webTemplate = Template.fromStack(app.node.findChild("TestWebStack") as cdk.Stack);
+    monitoringTemplate = Template.fromStack(monitoring);
   });
 
   // ── NetworkStack ──
@@ -244,6 +250,20 @@ describe("CDK Stacks E2E — synth all stacks", () => {
             },
           ],
         },
+      });
+    });
+  });
+
+  // ── MonitoringStack ──
+
+  describe("MonitoringStack", () => {
+    it("CloudWatch Dashboard", () => {
+      monitoringTemplate.resourceCountIs("AWS::CloudWatch::Dashboard", 1);
+    });
+
+    it("Dashboard named ServerlessOpenClaw", () => {
+      monitoringTemplate.hasResourceProperties("AWS::CloudWatch::Dashboard", {
+        DashboardName: "ServerlessOpenClaw",
       });
     });
   });

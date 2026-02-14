@@ -5,6 +5,8 @@ import type { APIGatewayProxyEventV2 } from "aws-lambda";
 const mockRouteMessage = vi.fn();
 const mockSendTelegramMessage = vi.fn();
 const mockGetTaskState = vi.fn();
+const mockResolveUserId = vi.fn();
+const mockVerifyOtpAndLink = vi.fn();
 
 vi.mock("../../src/services/message.js", () => ({
   routeMessage: (...args: unknown[]) => mockRouteMessage(...args),
@@ -23,6 +25,11 @@ vi.mock("../../src/services/telegram.js", () => ({
 
 vi.mock("../../src/services/container.js", () => ({
   startTask: vi.fn(),
+}));
+
+vi.mock("../../src/services/identity.js", () => ({
+  resolveUserId: (...args: unknown[]) => mockResolveUserId(...args),
+  verifyOtpAndLink: (...args: unknown[]) => mockVerifyOtpAndLink(...args),
 }));
 
 vi.mock("@aws-sdk/lib-dynamodb", () => ({
@@ -70,6 +77,8 @@ describe("telegram-webhook handler", () => {
     mockRouteMessage.mockResolvedValue(undefined);
     mockSendTelegramMessage.mockResolvedValue(undefined);
     mockGetTaskState.mockResolvedValue(null);
+    mockResolveUserId.mockImplementation((_send: unknown, uid: string) => Promise.resolve(uid));
+    mockVerifyOtpAndLink.mockResolvedValue({ error: "not set" });
   });
 
   it("should return 403 for invalid secret token", async () => {
@@ -196,5 +205,168 @@ describe("telegram-webhook handler", () => {
 
     expect(result.statusCode).toBe(200);
     expect(mockRouteMessage).not.toHaveBeenCalled();
+  });
+
+  // ── /link command tests ──
+
+  it("should handle /link command successfully", async () => {
+    mockVerifyOtpAndLink.mockResolvedValueOnce({ cognitoUserId: "cognito-abc" });
+
+    const event = makeEvent(
+      {
+        message: {
+          chat: { id: 12345 },
+          from: { id: 67890 },
+          text: "/link 123456",
+        },
+      },
+      "my-secret",
+    );
+
+    const result = await handler(event);
+
+    expect(result.statusCode).toBe(200);
+    expect(mockVerifyOtpAndLink).toHaveBeenCalledWith(
+      expect.anything(),
+      "67890",
+      "123456",
+    );
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(String),
+      "telegram:12345",
+      expect.stringContaining("연동 완료"),
+    );
+    expect(mockRouteMessage).not.toHaveBeenCalled();
+  });
+
+  it("should handle /link command with error", async () => {
+    mockVerifyOtpAndLink.mockResolvedValueOnce({
+      error: "OTP가 만료되었거나 유효하지 않습니다.",
+    });
+
+    const event = makeEvent(
+      {
+        message: {
+          chat: { id: 12345 },
+          from: { id: 67890 },
+          text: "/link 000000",
+        },
+      },
+      "my-secret",
+    );
+
+    const result = await handler(event);
+
+    expect(result.statusCode).toBe(200);
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(String),
+      "telegram:12345",
+      expect.stringContaining("만료"),
+    );
+    expect(mockRouteMessage).not.toHaveBeenCalled();
+  });
+
+  it("should handle /link without code", async () => {
+    const event = makeEvent(
+      {
+        message: {
+          chat: { id: 12345 },
+          from: { id: 67890 },
+          text: "/link ",
+        },
+      },
+      "my-secret",
+    );
+
+    const result = await handler(event);
+
+    expect(result.statusCode).toBe(200);
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(String),
+      "telegram:12345",
+      expect.stringContaining("사용법"),
+    );
+    expect(mockVerifyOtpAndLink).not.toHaveBeenCalled();
+  });
+
+  it("should handle /unlink command", async () => {
+    const event = makeEvent(
+      {
+        message: {
+          chat: { id: 12345 },
+          from: { id: 67890 },
+          text: "/unlink",
+        },
+      },
+      "my-secret",
+    );
+
+    const result = await handler(event);
+
+    expect(result.statusCode).toBe(200);
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(String),
+      "telegram:12345",
+      expect.stringContaining("웹 UI"),
+    );
+    expect(mockRouteMessage).not.toHaveBeenCalled();
+  });
+
+  it("should resolve userId for linked telegram user", async () => {
+    mockResolveUserId.mockResolvedValueOnce("cognito-abc");
+    mockGetTaskState.mockResolvedValue({ status: "Running", publicIp: "1.2.3.4" });
+
+    const event = makeEvent(
+      {
+        message: {
+          chat: { id: 12345 },
+          from: { id: 67890 },
+          text: "hello",
+        },
+      },
+      "my-secret",
+    );
+
+    await handler(event);
+
+    expect(mockResolveUserId).toHaveBeenCalledWith(
+      expect.anything(),
+      "telegram:67890",
+    );
+    expect(mockRouteMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "cognito-abc",
+      }),
+    );
+  });
+
+  it("should include TELEGRAM_CHAT_ID in env when userId is resolved", async () => {
+    mockResolveUserId.mockResolvedValueOnce("cognito-abc");
+    mockGetTaskState.mockResolvedValue(null);
+
+    const event = makeEvent(
+      {
+        message: {
+          chat: { id: 12345 },
+          from: { id: 67890 },
+          text: "hello",
+        },
+      },
+      "my-secret",
+    );
+
+    await handler(event);
+
+    const routeCall = mockRouteMessage.mock.calls[0][0];
+    const env = routeCall.startTaskParams.environment;
+    expect(env).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "TELEGRAM_CHAT_ID", value: "12345" }),
+      ]),
+    );
   });
 });

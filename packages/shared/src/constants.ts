@@ -26,6 +26,10 @@ export const PENDING_MESSAGE_TTL_SEC = 5 * 60;
 export const CONNECTION_TTL_SEC = 24 * 60 * 60;
 export const PERIODIC_BACKUP_INTERVAL_MS = 5 * 60 * 1000;
 
+// Identity Linking (OTP)
+export const OTP_TTL_SEC = 300;
+export const OTP_LENGTH = 6;
+
 // Watchdog
 export const WATCHDOG_INTERVAL_MINUTES = 5;
 export const MIN_UPTIME_MINUTES = 5;

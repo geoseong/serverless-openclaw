@@ -17,6 +17,7 @@ import {
   formatHistoryContext,
 } from "./conversation-store.js";
 import type { PendingMessageItem, Channel } from "@serverless-openclaw/shared";
+import { publishStartupMetrics } from "./metrics.js";
 
 const REQUIRED_ENV = [
   "BRIDGE_AUTH_TOKEN",
@@ -96,6 +97,8 @@ function getTelegramChatId(userId: string): string | null {
 }
 
 async function main(): Promise<void> {
+  const t0 = Date.now();
+
   // Validate required env vars
   const env = Object.fromEntries(
     REQUIRED_ENV.map((name) => [name, requireEnv(name)]),
@@ -103,6 +106,8 @@ async function main(): Promise<void> {
 
   const { taskArn, cluster } = await getTaskMetadata();
   const userId = env.USER_ID;
+  const telegramChatId = process.env.TELEGRAM_CHAT_ID ?? getTelegramChatId(userId);
+  const channel = telegramChatId ? "telegram" : "web";
   const gatewayUrl = `ws://localhost:${18789}`;
 
   // Initialize AWS clients
@@ -116,30 +121,31 @@ async function main(): Promise<void> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ec2Send = ec2Client.send.bind(ec2Client) as (cmd: any) => Promise<any>;
 
-  const chatId = getTelegramChatId(userId);
-
   // Restore workspace from S3 (runs before gateway is ready)
   await restoreFromS3({
     bucket: env.DATA_BUCKET,
     prefix: `workspaces/${userId}`,
     localPath: "/data/workspace",
   });
+  const tS3 = Date.now();
 
-  if (chatId) {
-    await notifyTelegram(chatId, "⚡ 컨테이너 시작됨. AI 엔진 연결 중...");
+  if (telegramChatId) {
+    await notifyTelegram(telegramChatId, "⚡ 컨테이너 시작됨. AI 엔진 연결 중...");
   }
 
   // Wait for OpenClaw Gateway to be ready (up to 120s for cold start)
   await waitForPort(18789, 120000);
+  const tGateway = Date.now();
 
   // Initialize components
   const telegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
   const callbackSender = new CallbackSender(env.CALLBACK_URL, telegramBotToken);
   const openclawClient = new OpenClawClient(gatewayUrl, env.OPENCLAW_GATEWAY_TOKEN);
   await openclawClient.waitForReady();
+  const tClient = Date.now();
 
-  if (chatId) {
-    await notifyTelegram(chatId, "✅ 준비 완료! 메시지를 처리합니다...");
+  if (telegramChatId) {
+    await notifyTelegram(telegramChatId, "✅ 준비 완료! 메시지를 처리합니다...");
   }
 
   const lifecycle = new LifecycleManager({
@@ -167,8 +173,10 @@ async function main(): Promise<void> {
     openclawClient,
     callbackSender,
     lifecycle,
-    onMessageComplete: async (uid: string, userMsg: string, assistantMsg: string, channel: Channel) => {
-      await saveMessagePair(dynamoSend, uid, userMsg, assistantMsg, channel);
+    processStartTime: t0,
+    channel,
+    onMessageComplete: async (uid: string, userMsg: string, assistantMsg: string, ch: Channel) => {
+      await saveMessagePair(dynamoSend, uid, userMsg, assistantMsg, ch);
     },
     getAndClearHistoryPrefix: () => {
       const prefix = historyPrefix;
@@ -222,6 +230,19 @@ async function main(): Promise<void> {
   if (consumed > 0) {
     console.log(`Processed ${consumed} pending message(s)`);
   }
+
+  const tRunning = Date.now();
+  console.log(`Startup complete in ${tRunning - t0}ms (S3: ${tS3 - t0}ms, Gateway: ${tGateway - tS3}ms, Client: ${tClient - tGateway}ms)`);
+
+  void publishStartupMetrics({
+    total: tRunning - t0,
+    s3Restore: tS3 - t0,
+    gatewayWait: tGateway - tS3,
+    clientReady: tClient - tGateway,
+    pendingMessages: consumed,
+    userId,
+    channel,
+  });
 
   // Start periodic backup
   lifecycle.startPeriodicBackup();
