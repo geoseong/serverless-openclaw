@@ -21,8 +21,9 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates curl git && \
     rm -rf /var/lib/apt/lists/*
 
-# Install OpenClaw CLI and clean cache
-RUN npm install -g openclaw@latest && \
+# Install OpenClaw CLI (version configurable via build arg)
+ARG OPENCLAW_VERSION=2026.2.13
+RUN npm install -g openclaw@${OPENCLAW_VERSION} && \
     npm cache clean --force
 
 # Create non-root user

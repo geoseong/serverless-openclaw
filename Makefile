@@ -13,7 +13,7 @@ CLUSTER    := serverless-openclaw
 
 .PHONY: help build test lint deploy-all deploy-web deploy-image deploy-image-soci \
         user-create user-password user-list user-delete \
-        task-list task-status task-stop task-logs task-clean \
+        task-list task-status task-stop task-stop-recent task-logs task-clean \
         telegram-webhook telegram-status \
         web-build web-upload cf-invalidate \
         cold-start cold-start-warm \
@@ -181,6 +181,20 @@ task-stop: ## Stop all running ECS tasks
 	done
 	@echo "✅ All tasks stopped"
 
+task-stop-recent: ## Stop most recently started ECS task only
+	@TASK=$$(aws ecs list-tasks --cluster $(CLUSTER) \
+		--profile $(AWS_PROFILE) --region $(AWS_REGION) \
+		--sort-by startedAt --query "taskArns[-1]" --output text 2>/dev/null); \
+	if [ -z "$$TASK" ] || [ "$$TASK" = "None" ]; then \
+		echo "No running tasks"; \
+	else \
+		echo "Stopping $$TASK"; \
+		aws ecs stop-task --cluster $(CLUSTER) --task "$$TASK" \
+			--reason "Manual stop (most recent)" \
+			--profile $(AWS_PROFILE) --region $(AWS_REGION) > /dev/null; \
+		echo "Stopped"; \
+	fi
+
 task-clean: ## Stop tasks + clean TaskState DynamoDB
 	@$(MAKE) task-stop
 	@for pk in $$(aws dynamodb scan --table-name serverless-openclaw-TaskState \
@@ -220,7 +234,7 @@ telegram-status: ## Check Telegram webhook status
 
 ## ─── Cold Start Measurement ──────────────────────────────────────────────
 
-cold-start: ## Measure cold start time (waits for container idle)
+cold-start: task-stop task-clean ## Measure cold start time (stops tasks first, then waits for idle)
 	npx tsx scripts/cold-start-measure.ts
 
 cold-start-warm: ## Measure warm start time (skip idle wait)

@@ -261,13 +261,25 @@ CPU scaling history:
 | 1 vCPU | ~35s | +$0.005/session |
 | **2 vCPU** | **~25s (estimated from 55.8s total)** | **+$0.01/session** |
 
-#### P8: OpenClaw Version Upgrade
+#### P8: OpenClaw Version Management -- APPLIED
 
-**Status: Should monitor**
+| Item | Value |
+| ---- | ----- |
+| Impact | Configurable version via `OPENCLAW_VERSION` build arg, pinned to v2026.2.13 |
+| Cost | None |
+| Status | Applied (Dockerfile `ARG OPENCLAW_VERSION=2026.2.13`, deploy scripts pass version) |
 
-Current: v2026.2.9 (latest available: v2026.2.13). Newer versions may include startup performance improvements, plugin lazy loading, or reduced Chromium overhead.
+Dockerfile uses `openclaw@${OPENCLAW_VERSION}` build arg (default: `2026.2.13`). Version can be overridden via `OPENCLAW_VERSION` env var in `deploy-image.sh` or GitHub Actions workflow input.
 
-**Recommendation**: Test latest version and benchmark Gateway init time.
+Version compatibility testing (2026-02-15):
+
+| Version | Status | First Response |
+| ------- | ------ | -------------- |
+| v2026.2.9 | Working | 65.3s |
+| v2026.2.13 | Working | 57.9s |
+| v2026.2.14 | **Broken** | "missing scope: operator.write" |
+
+v2026.2.14 introduced a default-deny scope system requiring device pairing. Without paired device, `operator.write` scope is stripped, causing `chat.send` to fail. Pinned to v2026.2.13 (last compatible + fastest).
 
 #### P9: Predictive Pre-Warming (EventBridge Scheduled Scaling)
 
@@ -396,7 +408,7 @@ Even with all optional services disabled, the core Gateway still requires a pers
 | -------- | -------- | ------ | ---- | ------ |
 | ~~P6~~ | ~~zstd compression~~ | ~~-2.5s, -16% image~~ | ~~Free~~ | ~~APPLIED~~ |
 | ~~P7~~ | ~~CPU 2 vCPU~~ | ~~-9.5s (-14.5%)~~ | ~~+$0.01/session~~ | ~~APPLIED~~ |
-| **P8** | OpenClaw version upgrade | Unknown | Free | Low |
+| ~~P8~~ | ~~OpenClaw version management~~ | ~~v2026.2.13 pinned (-7.4s)~~ | ~~Free~~ | ~~APPLIED~~ |
 | **P9** | Predictive pre-warming | Eliminates cold start (scheduled) | ~$8-10/month | Medium |
 | P10 | Warm standby (Spot) | Eliminates cold start | ~$10-12/month | Low |
 
@@ -415,11 +427,11 @@ Even with all optional services disabled, the core Gateway still requires a pers
 
 | Item | Value |
 | ---- | ----- |
-| Fargate CPU | 2 vCPU (2048) |
-| Fargate Memory | 4096 MB |
+| Fargate CPU | 1 vCPU (1024) -- default, configurable via `FARGATE_CPU` env |
+| Fargate Memory | 2048 MB -- default, configurable via `FARGATE_MEMORY` env |
 | Architecture | ARM64 |
 | Docker Image | 217 MB (zstd compressed) |
-| OpenClaw Version | v2026.2.9 (latest: v2026.2.13) |
+| OpenClaw Version | v2026.2.13 (pinned, v2026.2.14 breaks scope) |
 | Inactivity Timeout | Dynamic (active: 30min / inactive: 10min) |
 | Lambda Runtime | Node.js 20 |
 | Lambda Memory | 256 MB |

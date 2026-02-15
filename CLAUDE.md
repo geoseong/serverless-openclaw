@@ -93,6 +93,7 @@ Table names use the `TABLE_NAMES` constant from `@serverless-openclaw/shared`.
 - **E2E Test Deployment:**
   - Local: AWS profile information managed via `.env` file (included in `.gitignore`)
   - CI: AWS deployment via GitHub Actions + OIDC authentication
+- **Cold start measurement:** Always use `make cold-start` (automatically stops tasks + cleans TaskState before measuring). Never run the measurement script directly without stopping existing tasks first. Use `make task-status` to verify, `make task-stop` to stop, and `make task-stop-recent` to stop only the most recent task.
 
 ## Key Design Patterns
 

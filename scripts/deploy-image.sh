@@ -36,10 +36,15 @@ aws ecr get-login-password --region "${REGION}" | \
 # Step 2: Build & Push with zstd compression
 echo ""
 echo "[2/3] Building and pushing Docker image (zstd compression)..."
+OPENCLAW_VERSION="${OPENCLAW_VERSION:-latest}"
+echo "OpenClaw version: ${OPENCLAW_VERSION}"
+
 docker buildx build \
   --platform linux/arm64 \
   -t "${ECR_REPO}:latest" \
+  --build-arg OPENCLAW_VERSION="${OPENCLAW_VERSION}" \
   --provenance=false \
+  --no-cache \
   --output type=image,push=true,compression=zstd,compression-level=3,force-compression=true \
   -f packages/container/Dockerfile .
 

@@ -8,6 +8,11 @@ on:
         required: false
         type: boolean
         default: false
+      openclaw-version:
+        description: 'OpenClaw version (e.g. 2026.2.9, latest)'
+        required: false
+        type: string
+        default: 'latest'
 
 permissions:
   id-token: write
@@ -54,6 +59,8 @@ jobs:
           tags: |
             ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
             ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          build-args: |
+            OPENCLAW_VERSION=${{ inputs.openclaw-version || 'latest' }}
           provenance: false
           outputs: type=image,compression=zstd,compression-level=3,force-compression=true
 
