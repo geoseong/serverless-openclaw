@@ -123,4 +123,4 @@ Details: See `docs/progress.md`. Implementation guide: Use `/implement 1-{N}` sk
 - `docs/PRD.md` — Product requirements
 - `docs/deployment.md` — AWS deployment guide (secrets, build, deploy, verification)
 - `docs/development.md` — Local development guide (environment, TDD, coding rules)
-- `docs/cold-start-analysis.md` — Cold start performance analysis and optimization roadmap
+- `docs/cold-start-optimization.md` — Cold start optimization (Phase 1 complete, Phase 2 in progress)

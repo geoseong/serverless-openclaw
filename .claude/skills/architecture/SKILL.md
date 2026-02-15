@@ -10,7 +10,7 @@ allowed-tools: Read, Glob, Grep
 
 - [architecture.md](../../../docs/architecture.md) — VPC/network, security groups, CDK stacks, DynamoDB schema, API protocols, security model
 - [implementation-plan.md](../../../docs/implementation-plan.md) — Detailed design based on MoltWorker reference
-- [cold-start-analysis.md](../../../docs/cold-start-analysis.md) — Cold start timeline, bottleneck analysis, optimization roadmap (issues #2-#6)
+- [cold-start-optimization.md](../../../docs/cold-start-optimization.md) — Cold start optimization (Phase 1 complete, Phase 2 in progress)
 
 ## Core Architecture Principles
 

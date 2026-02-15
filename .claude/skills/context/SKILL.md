@@ -34,4 +34,4 @@ See [PRD.md](../../../docs/PRD.md) for details:
 - Implementation plan: [docs/implementation-plan.md](../../../docs/implementation-plan.md)
 - Cost analysis: [docs/cost-optimization.md](../../../docs/cost-optimization.md)
 - Progress: [docs/progress.md](../../../docs/progress.md)
-- Cold start analysis: [docs/cold-start-analysis.md](../../../docs/cold-start-analysis.md)
+- Cold start optimization: [docs/cold-start-optimization.md](../../../docs/cold-start-optimization.md)

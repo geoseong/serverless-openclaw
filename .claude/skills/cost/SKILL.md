@@ -10,7 +10,7 @@ allowed-tools: Read, Glob, Grep
 
 Per-service cost breakdown, before/after optimization comparison, checklist:
 - [cost-optimization.md](../../../docs/cost-optimization.md)
-- [cold-start-analysis.md](../../../docs/cold-start-analysis.md) — Cold start optimization proposals with cost impact analysis (CPU upgrade, SOCI, timeout tuning)
+- [cold-start-optimization.md](../../../docs/cold-start-optimization.md) — Cold start optimization with cost impact analysis (Phase 1 complete, Phase 2 in progress)
 
 ## Cost Validation (Required for Infrastructure Changes)
 
