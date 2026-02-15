@@ -4,7 +4,7 @@
 
 ## Phase 1: Infrastructure Optimization (Complete)
 
-All 5 optimizations applied. Cold start reduced from ~126-150s to **63.9s** (~57% reduction).
+All 5 optimizations applied. Cold start reduced from ~126-150s to **68.5s** (~52% reduction).
 
 ### 1.1 End-to-End Cold Start Timeline
 
@@ -30,7 +30,7 @@ User sends message
     |
     Response received
 
-Total: ~64s (measured 2026-02-15)
+Total: ~68.5s (measured 2026-02-15, 1 vCPU + OpenClaw v2026.2.13)
 Previous: ~126-150s (2026-02-14, before optimizations)
 ```
 
@@ -41,10 +41,10 @@ Measured via `make cold-start` (WebSocket channel, cold start from idle):
 | Metric | Value |
 | ------ | ----- |
 | Start type | COLD (container idle -> RunTask) |
-| "Starting" status | +2.9s |
-| **First response** | **63.9s** |
-| **Stream complete** | **67.0s** |
-| Messages total | 55 |
+| "Starting" status | +2.5s |
+| **First response** | **68.5s** |
+| **Stream complete** | **68.6s** |
+| Messages total | 3 |
 
 **Improvement from baseline:**
 
@@ -52,11 +52,11 @@ Measured via `make cold-start` (WebSocket channel, cold start from idle):
 | ------- | -------------- | --------- |
 | Baseline (0.5 vCPU, serial startup) | ~126-150s | -- |
 | After CPU upgrade only (1 vCPU) | ~76.8s | ~40% |
-| **All optimizations applied** | **63.9s** | **~57%** |
+| **All optimizations applied (1 vCPU, v2026.2.13)** | **68.5s** | **~52%** |
 
-Timing breakdown (estimated from 63.9s total):
-- Lambda -> ECS RunTask trigger: ~2.9s
-- ECS provisioning + Container startup + Gateway init: ~58s
+Timing breakdown (estimated from 68.5s total):
+- Lambda -> ECS RunTask trigger: ~2.5s
+- ECS provisioning + Container startup + Gateway init: ~63s
 - AI inference (first token): ~3s
 
 ### 1.3 Applied Optimizations
@@ -118,9 +118,9 @@ Approach: Watchdog Lambda queries CloudWatch `MessageLatency` to detect active h
 | -------- | --------- | ------ |
 | Baseline (0.5 vCPU, serial) | ~128s | ~126-150s |
 | P1 only (CPU 1 vCPU) | ~88s | ~76.8s |
-| **All applied (P1-P5)** | **~68s** | **63.9s** |
+| **All applied (P1-P5, 1 vCPU)** | **~68s** | **68.5s** |
 
-Total improvement: **~57% reduction** from baseline.
+Total improvement: **~52% reduction** from baseline.
 
 ### 1.4 Baseline CloudWatch Metrics (2026-02-14, pre-optimization)
 
@@ -207,10 +207,10 @@ Gateway init (~30-35s) remains the largest single bottleneck (~52% of total cold
 
 | Component | Duration | Share |
 | --------- | -------- | ----- |
-| Lambda -> RunTask | ~2.9s | 5% |
-| ECS provisioning | ~25s | 39% |
-| **Gateway init** | **~30-35s** | **~52%** |
-| Client ready + AI response | ~3s | 5% |
+| Lambda -> RunTask | ~2.5s | 4% |
+| ECS provisioning | ~25s | 37% |
+| **Gateway init** | **~35s** | **~51%** |
+| Client ready + AI response | ~3s | 4% |
 
 ### 2.2 Approaches Evaluated
 
@@ -244,13 +244,13 @@ Measurement (GitHub issue #7):
 
 **Source**: [AWS Blog -- Reducing Fargate Startup with zstd](https://aws.amazon.com/blogs/containers/reducing-aws-fargate-startup-times-with-zstd-compressed-container-images/)
 
-#### P7: CPU Upgrade to 2 vCPU -- APPLIED
+#### P7: Configurable CPU (default 1 vCPU, optional 2 vCPU) -- APPLIED
 
 | Item | Value |
 | ---- | ----- |
-| Impact | First response 65.3s -> 55.8s (-9.5s, -14.5%) |
-| Cost | +$0.01/session (at ~15 min session) |
-| Status | Applied (CDK `cpu: 2048`, `memoryLimitMiB: 4096`) |
+| Impact | 2 vCPU: 65.3s -> 55.8s (-14.5%). Default 1 vCPU: 68.5s |
+| Cost | 1 vCPU: baseline, 2 vCPU: +$0.01/session |
+| Status | Applied (CDK `FARGATE_CPU`/`FARGATE_MEMORY` env configurable, default 1024/2048) |
 
 CPU scaling history:
 
@@ -416,9 +416,9 @@ Even with all optional services disabled, the core Gateway still requires a pers
 
 | Scenario | First Response |
 | -------- | -------------- |
-| Phase 1 complete | 63.9s |
-| + P6 zstd | 65.3s (within variance) |
-| **+ P7 CPU 2 vCPU (current)** | **55.8s** |
+| Phase 1 complete (1 vCPU) | 68.5s |
+| + P6 zstd + P8 v2026.2.13 | 68.5s (current, within variance) |
+| + P7 CPU 2 vCPU (optional) | 55.8s |
 | + P9 Predictive pre-warming | **0s** (during active hours) |
 
 ---
@@ -430,7 +430,7 @@ Even with all optional services disabled, the core Gateway still requires a pers
 | Fargate CPU | 1 vCPU (1024) -- default, configurable via `FARGATE_CPU` env |
 | Fargate Memory | 2048 MB -- default, configurable via `FARGATE_MEMORY` env |
 | Architecture | ARM64 |
-| Docker Image | 217 MB (zstd compressed) |
+| Docker Image | 218 MB (zstd compressed) |
 | OpenClaw Version | v2026.2.13 (pinned, v2026.2.14 breaks scope) |
 | Inactivity Timeout | Dynamic (active: 30min / inactive: 10min) |
 | Lambda Runtime | Node.js 20 |
