@@ -194,9 +194,8 @@ sudo mv soci /usr/local/bin/
 After deployment, check the `HttpApiEndpoint` value from CDK Output and register the webhook.
 
 ```bash
-# Using scripts/setup-telegram-webhook.sh
-chmod +x scripts/setup-telegram-webhook.sh
-./scripts/setup-telegram-webhook.sh
+# Using Makefile (recommended) — reads secret from SSM automatically
+make telegram-webhook
 
 # Or manual registration
 # <TELEGRAM_SECRET_TOKEN> = value from /serverless-openclaw/secrets/telegram-webhook-secret in SSM Parameter Store
@@ -295,6 +294,18 @@ wscat -c "<WebSocketApiEndpoint>?token=<ID_TOKEN>"
 4. Telegram 메시지 전송 → Web과 동일한 컨테이너로 라우팅 확인 (TaskState PK가 Cognito UUID)
 5. (선택) Web UI → "연동 해제" → Telegram 메시지가 별도 컨테이너로 라우팅되는지 확인
 
+### Cold Start Measurement
+
+```bash
+# Measure cold start (waits for container to become idle first)
+make cold-start
+
+# Measure warm start (skip idle wait)
+make cold-start-warm
+```
+
+The script authenticates via Cognito, connects WebSocket, sends "Hello!", and reports timing breakdown (first response, stream complete) with a full message timeline.
+
 ### Check ECS Task Status
 
 ```bash
@@ -383,6 +394,6 @@ curl "https://api.telegram.org/bot<BOT_TOKEN>/getWebhookInfo"
 ```
 
 **Common causes:**
-- Webhook URL not registered → run `scripts/setup-telegram-webhook.sh`
-- Secret token mismatch → verify SSM parameter value matches the value used during webhook registration
+- Webhook URL not registered → run `make telegram-webhook`
+- Secret token mismatch (403 Forbidden) → run `make telegram-webhook` to re-register with SSM secret
 - Lambda error → check CloudWatch logs for `telegram-webhook` function

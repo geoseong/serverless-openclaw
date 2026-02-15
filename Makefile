@@ -16,6 +16,7 @@ CLUSTER    := serverless-openclaw
         task-list task-status task-stop task-logs task-clean \
         telegram-webhook telegram-status \
         web-build web-upload cf-invalidate \
+        cold-start cold-start-warm \
         status teardown
 
 ## ─── Help ────────────────────────────────────────────────────────────────────
@@ -203,9 +204,9 @@ telegram-webhook: ## Register Telegram webhook
 	$(eval API_URL := $(shell aws cloudformation describe-stacks --stack-name ApiStack \
 		--query "Stacks[0].Outputs[?OutputKey=='HttpApiEndpoint'].OutputValue" \
 		--output text --profile $(AWS_PROFILE) --region $(AWS_REGION)))
-	$(eval SECRET := $(shell aws secretsmanager get-secret-value \
-		--secret-id serverless-openclaw/telegram-webhook-secret \
-		--query SecretString --output text \
+	$(eval SECRET := $(shell aws ssm get-parameter \
+		--name /serverless-openclaw/secrets/telegram-webhook-secret \
+		--with-decryption --query Parameter.Value --output text \
 		--profile $(AWS_PROFILE) --region $(AWS_REGION)))
 	TELEGRAM_BOT_TOKEN=$(TELEGRAM_BOT_TOKEN) \
 	WEBHOOK_URL=$(API_URL)/telegram \
@@ -216,6 +217,14 @@ telegram-status: ## Check Telegram webhook status
 	@curl -s "https://api.telegram.org/bot$(TELEGRAM_BOT_TOKEN)/getWebhookInfo" | \
 		python3 -m json.tool 2>/dev/null || \
 		curl -s "https://api.telegram.org/bot$(TELEGRAM_BOT_TOKEN)/getWebhookInfo"
+
+## ─── Cold Start Measurement ──────────────────────────────────────────────
+
+cold-start: ## Measure cold start time (waits for container idle)
+	npx tsx scripts/cold-start-measure.ts
+
+cold-start-warm: ## Measure warm start time (skip idle wait)
+	npx tsx scripts/cold-start-measure.ts --no-wait
 
 ## ─── Status ──────────────────────────────────────────────────────────────────
 

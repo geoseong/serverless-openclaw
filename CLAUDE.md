@@ -30,6 +30,9 @@ make task-status       # Fargate container status
 make deploy-web        # Build + upload + CloudFront invalidation
 make deploy-all        # CDK deploy all stacks
 make task-logs         # Tail container logs
+make cold-start        # Measure cold start time (waits for container idle)
+make cold-start-warm   # Measure warm start time (skip idle wait)
+make telegram-webhook  # Register Telegram webhook with SSM secret
 make help              # Show all targets
 ```
 

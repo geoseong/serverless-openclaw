@@ -7,6 +7,7 @@ export default defineConfig({
       "**/dist/**",
       "references/**",
       "**/*.e2e.test.ts",
+      "__tests__/integration/**",
     ],
   },
 });
