@@ -9,9 +9,13 @@ import {
   ApiStack,
   WebStack,
   MonitoringStack,
+  SecretsStack,
 } from "../lib/stacks/index.js";
 
 const app = new cdk.App();
+
+// Secrets (SSM SecureString parameters)
+const secrets = new SecretsStack(app, "SecretsStack");
 
 // Step 1-2: Network & Storage
 const network = new NetworkStack(app, "NetworkStack");
@@ -33,6 +37,8 @@ const compute = new ComputeStack(app, "ComputeStack", {
   ecrRepository: storage.ecrRepository,
 });
 
+compute.addDependency(secrets);
+
 // Step 1-5: API Gateway + Lambda
 // Note: compute resources (TaskDef, Cluster ARNs) read from SSM to avoid cross-stack export issues
 const api = new ApiStack(app, "ApiStack", {
@@ -47,6 +53,7 @@ const api = new ApiStack(app, "ApiStack", {
   userPoolClient: auth.userPoolClient,
 });
 api.addDependency(compute);
+api.addDependency(secrets);
 
 // Step 1-8: Web UI (S3 + CloudFront)
 new WebStack(app, "WebStack", {

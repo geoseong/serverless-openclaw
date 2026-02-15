@@ -32,6 +32,16 @@ vi.mock("../../src/services/identity.js", () => ({
   verifyOtpAndLink: (...args: unknown[]) => mockVerifyOtpAndLink(...args),
 }));
 
+vi.mock("../../src/services/secrets.js", () => ({
+  resolveSecrets: vi.fn().mockResolvedValue(
+    new Map([
+      ["/serverless-openclaw/secrets/bridge-auth-token", "bridge-token"],
+      ["/serverless-openclaw/secrets/telegram-bot-token", "123456:ABC-DEF"],
+      ["/serverless-openclaw/secrets/telegram-webhook-secret", "my-secret"],
+    ]),
+  ),
+}));
+
 vi.mock("@aws-sdk/lib-dynamodb", () => ({
   DynamoDBDocumentClient: { from: vi.fn(() => ({ send: vi.fn() })) },
   GetCommand: vi.fn(),
@@ -66,13 +76,13 @@ function makeEvent(
 describe("telegram-webhook handler", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv("TELEGRAM_SECRET_TOKEN", "my-secret");
-    vi.stubEnv("TELEGRAM_BOT_TOKEN", "123456:ABC-DEF");
+    vi.stubEnv("SSM_TELEGRAM_SECRET_TOKEN", "/serverless-openclaw/secrets/telegram-webhook-secret");
+    vi.stubEnv("SSM_TELEGRAM_BOT_TOKEN", "/serverless-openclaw/secrets/telegram-bot-token");
     vi.stubEnv("ECS_CLUSTER_ARN", "arn:cluster");
     vi.stubEnv("TASK_DEFINITION_ARN", "arn:taskdef");
     vi.stubEnv("SUBNET_IDS", "subnet-1");
     vi.stubEnv("SECURITY_GROUP_IDS", "sg-1");
-    vi.stubEnv("BRIDGE_AUTH_TOKEN", "bridge-token");
+    vi.stubEnv("SSM_BRIDGE_AUTH_TOKEN", "/serverless-openclaw/secrets/bridge-auth-token");
     vi.stubEnv("WEBSOCKET_CALLBACK_URL", "https://api.example.com");
     mockRouteMessage.mockResolvedValue(undefined);
     mockSendTelegramMessage.mockResolvedValue(undefined);

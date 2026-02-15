@@ -25,6 +25,14 @@ vi.mock("../../src/services/container.js", () => ({
   startTask: vi.fn(),
 }));
 
+vi.mock("../../src/services/secrets.js", () => ({
+  resolveSecrets: vi.fn().mockResolvedValue(
+    new Map([
+      ["/serverless-openclaw/secrets/bridge-auth-token", "bridge-token"],
+    ]),
+  ),
+}));
+
 vi.mock("@aws-sdk/lib-dynamodb", () => ({
   DynamoDBDocumentClient: { from: vi.fn(() => ({ send: vi.fn() })) },
   GetCommand: vi.fn(),
@@ -58,7 +66,7 @@ describe("ws-message handler", () => {
     vi.stubEnv("TASK_DEFINITION_ARN", "arn:taskdef");
     vi.stubEnv("SUBNET_IDS", "subnet-1,subnet-2");
     vi.stubEnv("SECURITY_GROUP_IDS", "sg-1");
-    vi.stubEnv("BRIDGE_AUTH_TOKEN", "bridge-token");
+    vi.stubEnv("SSM_BRIDGE_AUTH_TOKEN", "/serverless-openclaw/secrets/bridge-auth-token");
     vi.stubEnv("WEBSOCKET_CALLBACK_URL", "https://api.example.com");
 
     mockGetConnection.mockResolvedValue({

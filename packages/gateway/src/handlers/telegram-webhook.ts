@@ -8,6 +8,7 @@ import { routeMessage, savePendingMessage } from "../services/message.js";
 import { startTask } from "../services/container.js";
 import { sendTelegramMessage } from "../services/telegram.js";
 import { resolveUserId, verifyOtpAndLink } from "../services/identity.js";
+import { resolveSecrets } from "../services/secrets.js";
 
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const ecs = new ECSClient({});
@@ -28,8 +29,14 @@ export async function handler(event: {
   headers: Record<string, string | undefined>;
   body?: string;
 }): Promise<APIGatewayProxyResultV2> {
+  const secrets = await resolveSecrets([
+    process.env.SSM_BRIDGE_AUTH_TOKEN!,
+    process.env.SSM_TELEGRAM_BOT_TOKEN!,
+    process.env.SSM_TELEGRAM_SECRET_TOKEN!,
+  ]);
+
   const secretToken = event.headers["x-telegram-bot-api-secret-token"];
-  const expectedToken = process.env.TELEGRAM_SECRET_TOKEN;
+  const expectedToken = secrets.get(process.env.SSM_TELEGRAM_SECRET_TOKEN!) ?? "";
 
   if (!secretToken || secretToken !== expectedToken) {
     return { statusCode: 403, body: JSON.stringify({ error: "Forbidden" }) };
@@ -54,7 +61,7 @@ export async function handler(event: {
   const telegramId = String(update.message.from?.id ?? chatId);
   const rawUserId = `telegram:${telegramId}`;
   const connectionId = `telegram:${chatId}`;
-  const botToken = process.env.TELEGRAM_BOT_TOKEN ?? "";
+  const botToken = secrets.get(process.env.SSM_TELEGRAM_BOT_TOKEN!) ?? "";
   const text = update.message.text;
 
   // Handle /link command
@@ -126,7 +133,7 @@ export async function handler(event: {
     channel: "telegram",
     connectionId,
     callbackUrl: process.env.WEBSOCKET_CALLBACK_URL ?? "",
-    bridgeAuthToken: process.env.BRIDGE_AUTH_TOKEN ?? "",
+    bridgeAuthToken: secrets.get(process.env.SSM_BRIDGE_AUTH_TOKEN!) ?? "",
     fetchFn: fetch as never,
     getTaskState: (uid) => getTaskState(dynamoSend, uid),
     startTask: (params) => startTask(ecsSend, params),

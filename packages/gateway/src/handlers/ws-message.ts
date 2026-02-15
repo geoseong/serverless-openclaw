@@ -12,6 +12,7 @@ import { getConnection } from "../services/connections.js";
 import { getTaskState, putTaskState } from "../services/task-state.js";
 import { routeMessage, savePendingMessage } from "../services/message.js";
 import { startTask } from "../services/container.js";
+import { resolveSecrets } from "../services/secrets.js";
 
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const ecs = new ECSClient({});
@@ -70,13 +71,14 @@ export async function handler(event: {
   }
 
   if (msg.action === "sendMessage") {
+    const secrets = await resolveSecrets([process.env.SSM_BRIDGE_AUTH_TOKEN!]);
     const result = await routeMessage({
       userId,
       message: msg.message ?? "",
       channel: "web",
       connectionId,
       callbackUrl: process.env.WEBSOCKET_CALLBACK_URL ?? "",
-      bridgeAuthToken: process.env.BRIDGE_AUTH_TOKEN ?? "",
+      bridgeAuthToken: secrets.get(process.env.SSM_BRIDGE_AUTH_TOKEN!) ?? "",
       fetchFn: fetch as never,
       getTaskState: (uid) => getTaskState(dynamoSend, uid),
       startTask: (params) => startTask(ecsSend, params),

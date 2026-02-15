@@ -50,7 +50,7 @@ packages/
 
 **Data Flow:** Client -> API Gateway (WS/REST) -> Lambda -> Bridge(:8080 HTTP) -> OpenClaw Gateway(:18789 WS, JSON-RPC 2.0)
 
-**CDK Stacks:** NetworkStack -> StorageStack -> {AuthStack, ComputeStack} -> ApiStack -> WebStack + MonitoringStack
+**CDK Stacks:** SecretsStack + NetworkStack -> StorageStack -> {AuthStack, ComputeStack} -> ApiStack -> WebStack + MonitoringStack
 
 **Cross-stack decoupling:** ComputeStack writes TaskDefinition/Role ARNs to SSM Parameter Store (`packages/cdk/lib/stacks/ssm-params.ts`), ApiStack reads from SSM. No CloudFormation cross-stack exports between Compute and Api.
 
@@ -99,6 +99,7 @@ Table names use the `TABLE_NAMES` constant from `@serverless-openclaw/shared`.
 - **OpenClaw Protocol:** JSON-RPC 2.0 / MCP over WebSocket, `?token=` query authentication
 - **WebSocket Auth:** API Gateway WebSocket does NOT support JWT authorizers. ws-connect Lambda verifies Cognito JWT from `?token=` query param using `aws-jwt-verify`
 - **CDK Lambda bundling:** `externalModules: ["@aws-sdk/*"]` — AWS SDK v3 is provided by Lambda runtime, do not bundle it
+- **Lambda secrets:** `{{resolve:ssm-secure:...}}` is NOT supported in Lambda env vars. Lambda functions receive SSM parameter paths as env vars (`SSM_BRIDGE_AUTH_TOKEN`, etc.) and resolve SecureString values at runtime via `resolveSecrets()` in `packages/gateway/src/services/secrets.ts`
 - **CDK deploy order for cross-stack changes:** Use `--exclusively` flag when deploying individual stacks to skip dependency resolution. See `docs/deployment.md` for migration procedures.
 - **Web build before CDK synth:** `packages/web/dist/` must exist before `cdk synth` because `BucketDeployment`'s `Source.asset()` validates the path
 - **CloudWatch Custom Metrics:** Namespace `ServerlessOpenClaw`, 8 metrics (startup phases, message latency, response length). Controlled by `METRICS_ENABLED` env var. MonitoringStack creates dashboard with 5 rows (cold start, messages, Lambda, API GW, ECS/DynamoDB)

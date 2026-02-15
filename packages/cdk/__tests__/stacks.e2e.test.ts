@@ -9,6 +9,7 @@ import {
   ApiStack,
   WebStack,
   MonitoringStack,
+  SecretsStack,
 } from "../lib/stacks/index.js";
 
 describe("CDK Stacks E2E — synth all stacks", () => {
@@ -20,9 +21,13 @@ describe("CDK Stacks E2E — synth all stacks", () => {
   let apiTemplate: Template;
   let webTemplate: Template;
   let monitoringTemplate: Template;
+  let secretsTemplate: Template;
 
   beforeAll(() => {
     app = new cdk.App();
+
+    // Secrets
+    const secrets = new SecretsStack(app, "TestSecretsStack");
 
     // Step 1-2: Network & Storage
     const network = new NetworkStack(app, "TestNetworkStack");
@@ -70,6 +75,7 @@ describe("CDK Stacks E2E — synth all stacks", () => {
     // Monitoring Dashboard
     const monitoring = new MonitoringStack(app, "TestMonitoringStack");
 
+    secretsTemplate = Template.fromStack(secrets);
     networkTemplate = Template.fromStack(network);
     storageTemplate = Template.fromStack(storage);
     authTemplate = Template.fromStack(auth);
@@ -77,6 +83,14 @@ describe("CDK Stacks E2E — synth all stacks", () => {
     apiTemplate = Template.fromStack(api);
     webTemplate = Template.fromStack(app.node.findChild("TestWebStack") as cdk.Stack);
     monitoringTemplate = Template.fromStack(monitoring);
+  });
+
+  // ── SecretsStack ──
+
+  describe("SecretsStack", () => {
+    it("5 SSM SecureString parameters via Custom Resources", () => {
+      secretsTemplate.resourceCountIs("Custom::AWS", 5);
+    });
   });
 
   // ── NetworkStack ──

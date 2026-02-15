@@ -141,22 +141,25 @@ export class ApiStack extends cdk.Stack {
       environment: { ...commonEnv },
     });
 
-    // Inject secrets as env vars (resolved at deploy time via {{resolve:ssm-secure:...}})
+    // Pass SSM parameter paths — Lambda resolves SecureString at runtime via SDK
     const secretFunctions = [wsMessageFn, telegramWebhookFn, watchdogFn];
     for (const fn of secretFunctions) {
-      fn.addEnvironment(
-        "BRIDGE_AUTH_TOKEN",
-        cdk.SecretValue.ssmSecure(SSM_SECRETS.BRIDGE_AUTH_TOKEN).unsafeUnwrap(),
+      fn.addEnvironment("SSM_BRIDGE_AUTH_TOKEN", SSM_SECRETS.BRIDGE_AUTH_TOKEN);
+    }
+    telegramWebhookFn.addEnvironment("SSM_TELEGRAM_SECRET_TOKEN", SSM_SECRETS.TELEGRAM_WEBHOOK_SECRET);
+    telegramWebhookFn.addEnvironment("SSM_TELEGRAM_BOT_TOKEN", SSM_SECRETS.TELEGRAM_BOT_TOKEN);
+
+    // Grant SSM read access for secret resolution at runtime
+    for (const fn of secretFunctions) {
+      fn.addToRolePolicy(
+        new iam.PolicyStatement({
+          actions: ["ssm:GetParameters"],
+          resources: Object.values(SSM_SECRETS).map(
+            (p) => `arn:aws:ssm:${cdk.Aws.REGION}:${cdk.Aws.ACCOUNT_ID}:parameter${p}`,
+          ),
+        }),
       );
     }
-    telegramWebhookFn.addEnvironment(
-      "TELEGRAM_SECRET_TOKEN",
-      cdk.SecretValue.ssmSecure(SSM_SECRETS.TELEGRAM_WEBHOOK_SECRET).unsafeUnwrap(),
-    );
-    telegramWebhookFn.addEnvironment(
-      "TELEGRAM_BOT_TOKEN",
-      cdk.SecretValue.ssmSecure(SSM_SECRETS.TELEGRAM_BOT_TOKEN).unsafeUnwrap(),
-    );
 
     // ── IAM Permissions for all Lambda functions ──
 

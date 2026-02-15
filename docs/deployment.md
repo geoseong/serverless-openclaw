@@ -50,66 +50,53 @@ npx cdk bootstrap aws://<ACCOUNT_ID>/$AWS_REGION
 
 ---
 
-## 2. Secret Setup (SSM Parameter Store)
+## 2. Secret Setup (SecretsStack)
 
-Before deployment, you must manually create 3 SSM SecureString parameters (5 if using Telegram).
+Secrets are managed by CDK via `SecretsStack`. On the first deploy, provide all secret values as CloudFormation parameters. On subsequent deploys, CloudFormation automatically reuses the previous values (`UsePreviousValue`).
 
-```bash
-# Bridge auth token (for Lambda ↔ Fargate communication)
-aws ssm put-parameter \
-  --name "/serverless-openclaw/secrets/bridge-auth-token" \
-  --type SecureString \
-  --value "<YOUR_BRIDGE_TOKEN>" \
-  --profile $AWS_PROFILE
+### Prepare Secret Values
 
-# OpenClaw Gateway token
-aws ssm put-parameter \
-  --name "/serverless-openclaw/secrets/openclaw-gateway-token" \
-  --type SecureString \
-  --value "<YOUR_GATEWAY_TOKEN>" \
-  --profile $AWS_PROFILE
-
-# Anthropic API key
-aws ssm put-parameter \
-  --name "/serverless-openclaw/secrets/anthropic-api-key" \
-  --type SecureString \
-  --value "<YOUR_ANTHROPIC_API_KEY>" \
-  --profile $AWS_PROFILE
-```
-
-> **bridge-auth-token** should be a randomly generated long string (e.g., `openssl rand -hex 32`).
+| Parameter | How to Obtain |
+|-----------|--------------|
+| `BridgeAuthToken` | Random string: `openssl rand -hex 32` |
+| `OpenclawGatewayToken` | Your OpenClaw Gateway token |
+| `AnthropicApiKey` | Your Anthropic API key |
+| `TelegramBotToken` | (Optional) Token from @BotFather |
+| `TelegramWebhookSecret` | (Optional) Random string: `openssl rand -hex 32` (must **not** contain `:`) |
 
 ### When Using Telegram Bot (Optional)
-
-#### Step 1: Create a Bot via @BotFather
 
 1. Open Telegram and search for `@BotFather`
 2. Send `/newbot`
 3. Enter a display name (e.g., `My OpenClaw`)
 4. Enter a username ending with `bot` (e.g., `my_openclaw_bot`)
-5. BotFather will reply with an **HTTP API token** (e.g., `123456789:ABCdefGHI...`). Save this token.
+5. BotFather will reply with an **HTTP API token** (e.g., `123456789:ABCdefGHI...`). Use this as `TelegramBotToken`.
 
-#### Step 2: Store the Token in SSM Parameter Store
+### Deploy SecretsStack (First Time)
 
 ```bash
-aws ssm put-parameter \
-  --name "/serverless-openclaw/secrets/telegram-bot-token" \
-  --type SecureString \
-  --value "<TOKEN_FROM_BOTFATHER>" \
+cd packages/cdk
+
+# With Telegram
+npx cdk deploy SecretsStack \
+  --parameters "BridgeAuthToken=$(openssl rand -hex 32)" \
+  --parameters "OpenclawGatewayToken=<YOUR_GATEWAY_TOKEN>" \
+  --parameters "AnthropicApiKey=<YOUR_ANTHROPIC_API_KEY>" \
+  --parameters "TelegramBotToken=<TOKEN_FROM_BOTFATHER>" \
+  --parameters "TelegramWebhookSecret=$(openssl rand -hex 32)" \
+  --profile $AWS_PROFILE
+
+# Without Telegram (use placeholder values for Telegram parameters)
+npx cdk deploy SecretsStack \
+  --parameters "BridgeAuthToken=$(openssl rand -hex 32)" \
+  --parameters "OpenclawGatewayToken=<YOUR_GATEWAY_TOKEN>" \
+  --parameters "AnthropicApiKey=<YOUR_ANTHROPIC_API_KEY>" \
+  --parameters "TelegramBotToken=unused" \
+  --parameters "TelegramWebhookSecret=unused" \
   --profile $AWS_PROFILE
 ```
 
-#### Step 3: Create Webhook Secret
-
-The webhook secret is a separate random string used to verify that incoming webhook requests are from Telegram. It must **not** contain `:` characters (bot tokens are not suitable).
-
-```bash
-aws ssm put-parameter \
-  --name "/serverless-openclaw/secrets/telegram-webhook-secret" \
-  --type SecureString \
-  --value "$(openssl rand -hex 32)" \
-  --profile $AWS_PROFILE
-```
+> On subsequent deploys (`cdk deploy --all`), SecretsStack parameters are automatically reused — no need to provide them again.
 
 ---
 
@@ -150,7 +137,8 @@ Deployment order based on dependencies:
 ```bash
 cd packages/cdk
 
-# Step 1: Base infrastructure
+# Step 1: Secrets + Base infrastructure
+npx cdk deploy SecretsStack --parameters "..." --profile $AWS_PROFILE  # see Section 2
 npx cdk deploy NetworkStack StorageStack --profile $AWS_PROFILE
 
 # Step 2: Auth + Compute
@@ -367,8 +355,8 @@ Error: Cannot find asset at /path/to/packages/web/dist
 Error: SSM parameter not found
 ```
 
-**Cause:** SSM SecureString parameters not created
-**Solution:** See [2. Secret Setup](#2-secret-setup-ssm-parameter-store)
+**Cause:** SecretsStack not deployed before other stacks
+**Solution:** Deploy SecretsStack first. See [2. Secret Setup](#2-secret-setup-secretsstack)
 
 ### Fargate Task Startup Failure
 
