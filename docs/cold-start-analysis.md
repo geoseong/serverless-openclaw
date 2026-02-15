@@ -1,6 +1,6 @@
 # Cold Start Performance Analysis
 
-> Date: 2026-02-14 | Region: ap-northeast-2 | Fargate ARM64 0.5 vCPU / 1024 MB
+> Date: 2026-02-14 | Region: ap-northeast-2 | Fargate ARM64 1 vCPU / 2048 MB (upgraded from 0.5 vCPU / 1024 MB)
 
 ## 1. End-to-End Cold Start Timeline
 
@@ -90,8 +90,8 @@ Tasks performed by `openclaw gateway run`:
 
 CPU scaling history:
 - 0.25 vCPU → 120s (exceeded timeout)
-- 0.5 vCPU → 80s (current)
-- 1.0 vCPU → ~40-50s (estimated, assuming CPU-bound)
+- 0.5 vCPU → 80s (previous)
+- 1.0 vCPU → ~40-50s (current, estimated assuming CPU-bound)
 
 ### 3.2 ECS Fargate Provisioning: ~35s (28%)
 
@@ -115,7 +115,7 @@ Between 06:48-06:50, 6 Lambda invocations failed with "fetch failed" at ~10.5s e
 
 ## 4. Optimization Proposals
 
-### Priority 1: CPU Upgrade (0.5 → 1 vCPU)
+### Priority 1: CPU Upgrade (0.5 → 1 vCPU) — APPLIED
 
 | Item | Value |
 | ---- | ----- |
@@ -123,6 +123,7 @@ Between 06:48-06:50, 6 Lambda invocations failed with "fetch failed" at ~10.5s e
 | Cost impact | +$0.02048/hr (Fargate vCPU rate), +$0.005/session at 15 min |
 | Implementation effort | Low (CDK `cpu: 1024` change) |
 | Risk | None (easy rollback) |
+| Status | Applied (CPU 512→1024, Memory 1024→2048) |
 
 ### Priority 2: SOCI Lazy Loading
 
@@ -184,8 +185,8 @@ Approach: Watchdog Lambda queries CloudWatch `MessageLatency` to detect active h
 
 | Item | Value |
 | ---- | ----- |
-| Fargate CPU | 0.5 vCPU (512) |
-| Fargate Memory | 1024 MB |
+| Fargate CPU | 1 vCPU (1024) |
+| Fargate Memory | 2048 MB |
 | Architecture | ARM64 |
 | Docker Image | 258 MB (compressed) |
 | OpenClaw Version | v2026.2.9 (latest: v2026.2.13) |
