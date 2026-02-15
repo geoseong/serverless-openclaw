@@ -30,6 +30,8 @@ cp .env.example .env
 # Edit .env with your values:
 #   AWS_PROFILE=your-aws-profile-name
 #   AWS_REGION=ap-northeast-2
+#   FARGATE_CPU=2048       # optional (256/512/1024/2048/4096)
+#   FARGATE_MEMORY=4096    # optional (must be compatible with CPU)
 ```
 
 Then load the environment before running any AWS/CDK commands:

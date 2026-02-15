@@ -35,6 +35,8 @@ const compute = new ComputeStack(app, "ComputeStack", {
   pendingMessagesTable: storage.pendingMessagesTable,
   dataBucket: storage.dataBucket,
   ecrRepository: storage.ecrRepository,
+  fargateCpu: process.env.FARGATE_CPU ? Number(process.env.FARGATE_CPU) : undefined,
+  fargateMemory: process.env.FARGATE_MEMORY ? Number(process.env.FARGATE_MEMORY) : undefined,
 });
 
 compute.addDependency(secrets);

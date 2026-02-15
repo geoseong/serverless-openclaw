@@ -21,6 +21,10 @@ export interface ComputeStackProps extends cdk.StackProps {
   pendingMessagesTable: dynamodb.ITable;
   dataBucket: s3.IBucket;
   ecrRepository: ecr.IRepository;
+  /** Fargate CPU units (256, 512, 1024, 2048, 4096). Default: 2048 */
+  fargateCpu?: number;
+  /** Fargate memory in MiB. Must be compatible with CPU. Default: 4096 */
+  fargateMemory?: number;
 }
 
 export class ComputeStack extends cdk.Stack {
@@ -56,10 +60,10 @@ export class ComputeStack extends cdk.Stack {
       enableFargateCapacityProviders: true,
     });
 
-    // Fargate Task Definition — ARM64, minimal resources
+    // Fargate Task Definition — ARM64
     this.taskDefinition = new ecs.FargateTaskDefinition(this, "TaskDef", {
-      memoryLimitMiB: 2048,
-      cpu: 1024,
+      memoryLimitMiB: props.fargateMemory ?? 4096,
+      cpu: props.fargateCpu ?? 2048,
       runtimePlatform: {
         cpuArchitecture: ecs.CpuArchitecture.ARM64,
         operatingSystemFamily: ecs.OperatingSystemFamily.LINUX,

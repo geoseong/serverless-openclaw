@@ -244,23 +244,22 @@ Measurement (GitHub issue #7):
 
 **Source**: [AWS Blog -- Reducing Fargate Startup with zstd](https://aws.amazon.com/blogs/containers/reducing-aws-fargate-startup-times-with-zstd-compressed-container-images/)
 
-#### P7: CPU Upgrade to 2 vCPU
-
-**Status: Implementable**
-
-| CPU | Gateway Init (measured/estimated) | Monthly Cost Delta |
-| --- | --------------------------------- | ------------------ |
-| 0.5 vCPU | ~80s | baseline |
-| 1 vCPU | ~35s (measured) | +$0.005/session |
-| **2 vCPU** | **~20-25s (estimated)** | **+$0.01/session** |
-| 4 vCPU | ~15-18s (estimated, diminishing returns) | +$0.02/session |
+#### P7: CPU Upgrade to 2 vCPU -- APPLIED
 
 | Item | Value |
 | ---- | ----- |
-| Expected impact | Gateway init ~35s -> ~20-25s |
-| Cost impact | +$0.01/session (at ~15 min session) |
-| Implementation | CDK `cpu: 2048`, `memoryLimitMiB: 4096` |
-| Risk | Low (easy rollback); diminishing returns beyond 2 vCPU |
+| Impact | First response 65.3s -> 55.8s (-9.5s, -14.5%) |
+| Cost | +$0.01/session (at ~15 min session) |
+| Status | Applied (CDK `cpu: 2048`, `memoryLimitMiB: 4096`) |
+
+CPU scaling history:
+
+| CPU | Gateway Init (measured) | Monthly Cost Delta |
+| --- | ----------------------- | ------------------ |
+| 0.25 vCPU | ~120s (timeout) | baseline |
+| 0.5 vCPU | ~80s | -- |
+| 1 vCPU | ~35s | +$0.005/session |
+| **2 vCPU** | **~25s (estimated from 55.8s total)** | **+$0.01/session** |
 
 #### P8: OpenClaw Version Upgrade
 
@@ -396,7 +395,7 @@ Even with all optional services disabled, the core Gateway still requires a pers
 | Priority | Approach | Impact | Cost | Effort |
 | -------- | -------- | ------ | ---- | ------ |
 | ~~P6~~ | ~~zstd compression~~ | ~~-2.5s, -16% image~~ | ~~Free~~ | ~~APPLIED~~ |
-| **P7** | CPU 2 vCPU | ~10-15s savings | +$0.01/session | Low |
+| ~~P7~~ | ~~CPU 2 vCPU~~ | ~~-9.5s (-14.5%)~~ | ~~+$0.01/session~~ | ~~APPLIED~~ |
 | **P8** | OpenClaw version upgrade | Unknown | Free | Low |
 | **P9** | Predictive pre-warming | Eliminates cold start (scheduled) | ~$8-10/month | Medium |
 | P10 | Warm standby (Spot) | Eliminates cold start | ~$10-12/month | Low |
@@ -406,8 +405,8 @@ Even with all optional services disabled, the core Gateway still requires a pers
 | Scenario | First Response |
 | -------- | -------------- |
 | Phase 1 complete | 63.9s |
-| **+ P6 zstd (current)** | **65.3s** (single measurement, within variance) |
-| + P7 CPU 2 vCPU | ~45-50s (estimated) |
+| + P6 zstd | 65.3s (within variance) |
+| **+ P7 CPU 2 vCPU (current)** | **55.8s** |
 | + P9 Predictive pre-warming | **0s** (during active hours) |
 
 ---
@@ -416,8 +415,8 @@ Even with all optional services disabled, the core Gateway still requires a pers
 
 | Item | Value |
 | ---- | ----- |
-| Fargate CPU | 1 vCPU (1024) |
-| Fargate Memory | 2048 MB |
+| Fargate CPU | 2 vCPU (2048) |
+| Fargate Memory | 4096 MB |
 | Architecture | ARM64 |
 | Docker Image | 217 MB (zstd compressed) |
 | OpenClaw Version | v2026.2.9 (latest: v2026.2.13) |
