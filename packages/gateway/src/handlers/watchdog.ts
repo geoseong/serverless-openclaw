@@ -1,21 +1,66 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, ScanCommand, DeleteCommand } from "@aws-sdk/lib-dynamodb";
 import { ECSClient, StopTaskCommand, DescribeTasksCommand } from "@aws-sdk/client-ecs";
+import { CloudWatchClient, GetMetricStatisticsCommand } from "@aws-sdk/client-cloudwatch";
 import {
   TABLE_NAMES,
   INACTIVITY_TIMEOUT_MS,
+  ACTIVE_TIMEOUT_MS,
+  INACTIVE_TIMEOUT_MS,
+  ACTIVITY_LOOKBACK_DAYS,
+  ACTIVE_HOUR_THRESHOLD,
+  METRICS_NAMESPACE,
   MIN_UPTIME_MINUTES,
 } from "@serverless-openclaw/shared";
 import type { TaskStateItem } from "@serverless-openclaw/shared";
 
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const ecs = new ECSClient({});
+const cloudwatch = new CloudWatchClient({});
 
 const STALE_STARTING_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+
+async function getActiveTimeout(): Promise<number> {
+  try {
+    const now = new Date();
+    const currentHourKST = (now.getUTCHours() + 9) % 24;
+    const startTime = new Date(now.getTime() - ACTIVITY_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
+
+    let totalActiveDatapoints = 0;
+
+    for (const channel of ["telegram", "web"]) {
+      const result = await cloudwatch.send(
+        new GetMetricStatisticsCommand({
+          Namespace: METRICS_NAMESPACE,
+          MetricName: "MessageLatency",
+          StartTime: startTime,
+          EndTime: now,
+          Period: 3600,
+          Statistics: ["SampleCount"],
+          Dimensions: [{ Name: "Channel", Value: channel }],
+        }),
+      );
+
+      const matchingDatapoints = (result.Datapoints ?? []).filter((dp) => {
+        if (!dp.Timestamp) return false;
+        const dpHourKST = (new Date(dp.Timestamp).getUTCHours() + 9) % 24;
+        return dpHourKST === currentHourKST;
+      });
+
+      totalActiveDatapoints += matchingDatapoints.length;
+    }
+
+    if (totalActiveDatapoints === 0) return INACTIVITY_TIMEOUT_MS;
+    return totalActiveDatapoints >= ACTIVE_HOUR_THRESHOLD ? ACTIVE_TIMEOUT_MS : INACTIVE_TIMEOUT_MS;
+  } catch {
+    return INACTIVITY_TIMEOUT_MS;
+  }
+}
 
 export async function handler(): Promise<void> {
   const cluster = process.env.ECS_CLUSTER_ARN ?? "";
   const now = Date.now();
+  const timeout = await getActiveTimeout();
 
   // Scan all active TaskState items (Running or Starting)
   const result = (await ddb.send(
@@ -65,7 +110,7 @@ export async function handler(): Promise<void> {
 
     // Stop tasks that have been inactive too long
     const inactiveMs = now - lastActivity;
-    if (inactiveMs > INACTIVITY_TIMEOUT_MS) {
+    if (inactiveMs > timeout) {
       await ecs.send(
         new StopTaskCommand({
           cluster,

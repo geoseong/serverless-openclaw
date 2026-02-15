@@ -33,3 +33,10 @@ export const OTP_LENGTH = 6;
 // Watchdog
 export const WATCHDOG_INTERVAL_MINUTES = 5;
 export const MIN_UPTIME_MINUTES = 5;
+
+// Dynamic Timeout
+export const ACTIVE_TIMEOUT_MS = 30 * 60 * 1000; // 30 min — active hours
+export const INACTIVE_TIMEOUT_MS = 10 * 60 * 1000; // 10 min — inactive hours
+export const ACTIVITY_LOOKBACK_DAYS = 7;
+export const ACTIVE_HOUR_THRESHOLD = 2; // >= 2 days with activity at this hour
+export const METRICS_NAMESPACE = "ServerlessOpenClaw";

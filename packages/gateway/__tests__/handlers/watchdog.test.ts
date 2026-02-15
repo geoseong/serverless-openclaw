@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockDynamoSend, mockEcsSend } = vi.hoisted(() => ({
+const { mockDynamoSend, mockEcsSend, mockCloudWatchSend } = vi.hoisted(() => ({
   mockDynamoSend: vi.fn(),
   mockEcsSend: vi.fn(),
+  mockCloudWatchSend: vi.fn(),
 }));
 
 vi.mock("@aws-sdk/lib-dynamodb", () => ({
@@ -21,10 +22,17 @@ vi.mock("@aws-sdk/client-ecs", () => ({
   DescribeTasksCommand: vi.fn((params: unknown) => ({ input: params, _tag: "DescribeTasksCommand" })),
 }));
 
+vi.mock("@aws-sdk/client-cloudwatch", () => ({
+  CloudWatchClient: vi.fn(() => ({ send: mockCloudWatchSend })),
+  GetMetricStatisticsCommand: vi.fn((input: unknown) => ({ input, _tag: "GetMetricStatistics" })),
+}));
+
 describe("watchdog handler", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("ECS_CLUSTER_ARN", "arn:cluster");
+    // Default: CW returns no data → fallback 15-min timeout
+    mockCloudWatchSend.mockResolvedValue({ Datapoints: [] });
   });
 
   it("should stop tasks inactive for more than 15 minutes", async () => {
@@ -166,4 +174,214 @@ describe("watchdog handler", () => {
     expect(mockEcsSend).not.toHaveBeenCalled();
     expect(mockDynamoSend).toHaveBeenCalledTimes(1); // only the scan
   });
+
+  describe("dynamic timeout", () => {
+    it("should use 30-min timeout during active hours (>= 2 datapoints at current hour)", async () => {
+      const { handler } = await import("../../src/handlers/watchdog.js");
+
+      const now = new Date();
+      const currentHourKST = (now.getUTCHours() + 9) % 24;
+
+      // Return datapoints matching current KST hour for both channels
+      mockCloudWatchSend.mockResolvedValue({
+        Datapoints: [
+          { Timestamp: createTimestampForKSTHour(currentHourKST, 1), SampleCount: 5 },
+          { Timestamp: createTimestampForKSTHour(currentHourKST, 2), SampleCount: 3 },
+        ],
+      });
+
+      // Task inactive for 25 min — would be stopped with 15-min default,
+      // but should NOT be stopped with 30-min active timeout
+      const lastActivity = new Date(Date.now() - 25 * 60 * 1000).toISOString();
+      mockDynamoSend.mockResolvedValueOnce({
+        Items: [
+          {
+            PK: "USER#user-1",
+            taskArn: "arn:task-1",
+            status: "Running",
+            startedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+            lastActivity,
+          },
+        ],
+      });
+
+      await handler();
+
+      // Should NOT stop — 25 min < 30 min active timeout
+      expect(mockEcsSend).not.toHaveBeenCalled();
+    });
+
+    it("should use 10-min timeout during inactive hours (< 2 total datapoints at current hour)", async () => {
+      const { handler } = await import("../../src/handlers/watchdog.js");
+
+      const now = new Date();
+      const currentHourKST = (now.getUTCHours() + 9) % 24;
+
+      // First channel (telegram): 1 datapoint at current hour
+      mockCloudWatchSend.mockResolvedValueOnce({
+        Datapoints: [
+          { Timestamp: createTimestampForKSTHour(currentHourKST, 1), SampleCount: 1 },
+        ],
+      });
+      // Second channel (web): 0 datapoints → total = 1, below threshold of 2
+      mockCloudWatchSend.mockResolvedValueOnce({
+        Datapoints: [],
+      });
+
+      // Task inactive for 12 min — would NOT be stopped with 15-min default,
+      // but SHOULD be stopped with 10-min inactive timeout
+      const lastActivity = new Date(Date.now() - 12 * 60 * 1000).toISOString();
+      mockDynamoSend.mockResolvedValueOnce({
+        Items: [
+          {
+            PK: "USER#user-1",
+            taskArn: "arn:task-1",
+            status: "Running",
+            startedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+            lastActivity,
+          },
+        ],
+      });
+      mockEcsSend.mockResolvedValue({});
+      mockDynamoSend.mockResolvedValue({});
+
+      await handler();
+
+      // Should stop — 12 min > 10 min inactive timeout
+      expect(mockEcsSend).toHaveBeenCalledWith(
+        expect.objectContaining({
+          input: expect.objectContaining({
+            task: "arn:task-1",
+            reason: expect.stringContaining("inactivity"),
+          }),
+        }),
+      );
+    });
+
+    it("should fall back to 15-min timeout on CloudWatch error", async () => {
+      const { handler } = await import("../../src/handlers/watchdog.js");
+
+      mockCloudWatchSend.mockRejectedValue(new Error("CW API error"));
+
+      // Task inactive for 12 min — should NOT be stopped with 15-min fallback
+      const lastActivity = new Date(Date.now() - 12 * 60 * 1000).toISOString();
+      mockDynamoSend.mockResolvedValueOnce({
+        Items: [
+          {
+            PK: "USER#user-1",
+            taskArn: "arn:task-1",
+            status: "Running",
+            startedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+            lastActivity,
+          },
+        ],
+      });
+
+      await handler();
+
+      // Should NOT stop — 12 min < 15 min fallback
+      expect(mockEcsSend).not.toHaveBeenCalled();
+    });
+
+    it("should fall back to 15-min timeout when CW returns empty data", async () => {
+      const { handler } = await import("../../src/handlers/watchdog.js");
+
+      mockCloudWatchSend.mockResolvedValue({ Datapoints: [] });
+
+      // Task inactive for 20 min — should be stopped with 15-min fallback
+      const lastActivity = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+      mockDynamoSend.mockResolvedValueOnce({
+        Items: [
+          {
+            PK: "USER#user-1",
+            taskArn: "arn:task-1",
+            status: "Running",
+            startedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+            lastActivity,
+          },
+        ],
+      });
+      mockEcsSend.mockResolvedValue({});
+      mockDynamoSend.mockResolvedValue({});
+
+      await handler();
+
+      // Should stop — 20 min > 15 min fallback
+      expect(mockEcsSend).toHaveBeenCalledWith(
+        expect.objectContaining({
+          input: expect.objectContaining({
+            task: "arn:task-1",
+            reason: expect.stringContaining("inactivity"),
+          }),
+        }),
+      );
+    });
+
+    it("should query both telegram and web channels", async () => {
+      const { handler } = await import("../../src/handlers/watchdog.js");
+
+      mockCloudWatchSend.mockResolvedValue({ Datapoints: [] });
+      mockDynamoSend.mockResolvedValueOnce({ Items: [] });
+
+      await handler();
+
+      expect(mockCloudWatchSend).toHaveBeenCalledTimes(2);
+
+      const calls = mockCloudWatchSend.mock.calls;
+      const dimensions = calls.map(
+        (call: [{ input: { Dimensions: Array<{ Name: string; Value: string }> } }]) =>
+          call[0].input.Dimensions[0].Value,
+      );
+      expect(dimensions).toContain("telegram");
+      expect(dimensions).toContain("web");
+    });
+
+    it("should only count datapoints matching current KST hour", async () => {
+      const { handler } = await import("../../src/handlers/watchdog.js");
+
+      const now = new Date();
+      const currentHourKST = (now.getUTCHours() + 9) % 24;
+      const differentHourKST = (currentHourKST + 5) % 24;
+
+      // Return datapoints at a different hour — should NOT count
+      mockCloudWatchSend.mockResolvedValue({
+        Datapoints: [
+          { Timestamp: createTimestampForKSTHour(differentHourKST, 1), SampleCount: 10 },
+          { Timestamp: createTimestampForKSTHour(differentHourKST, 2), SampleCount: 10 },
+          { Timestamp: createTimestampForKSTHour(differentHourKST, 3), SampleCount: 10 },
+        ],
+      });
+
+      // Task inactive for 12 min — with 0 matching datapoints, falls back to 15-min default
+      const lastActivity = new Date(Date.now() - 12 * 60 * 1000).toISOString();
+      mockDynamoSend.mockResolvedValueOnce({
+        Items: [
+          {
+            PK: "USER#user-1",
+            taskArn: "arn:task-1",
+            status: "Running",
+            startedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+            lastActivity,
+          },
+        ],
+      });
+
+      await handler();
+
+      // Should NOT stop — 12 min < 15 min fallback (different-hour datapoints don't count)
+      expect(mockEcsSend).not.toHaveBeenCalled();
+    });
+  });
 });
+
+/**
+ * Create a Date that falls at the given KST hour, offset by daysAgo days.
+ */
+function createTimestampForKSTHour(kstHour: number, daysAgo: number): Date {
+  const now = new Date();
+  const utcHour = (kstHour - 9 + 24) % 24;
+  const d = new Date(now);
+  d.setUTCDate(d.getUTCDate() - daysAgo);
+  d.setUTCHours(utcHour, 30, 0, 0); // :30 minutes into the hour
+  return d;
+}
