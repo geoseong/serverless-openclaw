@@ -35,6 +35,10 @@ export const OTP_LENGTH = 6;
 export const WATCHDOG_INTERVAL_MINUTES = 5;
 export const MIN_UPTIME_MINUTES = 5;
 
+// Prewarm
+export const PREWARM_USER_ID = "system:prewarm";
+export const DEFAULT_PREWARM_DURATION_MIN = 60;
+
 // Dynamic Timeout
 export const ACTIVE_TIMEOUT_MS = 30 * 60 * 1000; // 30 min — active hours
 export const INACTIVE_TIMEOUT_MS = 10 * 60 * 1000; // 10 min — inactive hours

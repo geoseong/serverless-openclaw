@@ -203,8 +203,8 @@ describe("CDK Stacks E2E — synth all stacks", () => {
   // ── ApiStack ──
 
   describe("ApiStack", () => {
-    it("6 Lambda functions", () => {
-      apiTemplate.resourceCountIs("AWS::Lambda::Function", 6);
+    it("7 Lambda functions (including prewarm)", () => {
+      apiTemplate.resourceCountIs("AWS::Lambda::Function", 7);
     });
 
     it("WebSocket API", () => {
@@ -218,7 +218,8 @@ describe("CDK Stacks E2E — synth all stacks", () => {
       });
     });
 
-    it("EventBridge watchdog rule", () => {
+    it("EventBridge watchdog rule (no prewarm schedule set)", () => {
+      // Without PREWARM_SCHEDULE env var, only watchdog rule exists
       apiTemplate.resourceCountIs("AWS::Events::Rule", 1);
     });
 
@@ -280,5 +281,53 @@ describe("CDK Stacks E2E — synth all stacks", () => {
         DashboardName: "ServerlessOpenClaw",
       });
     });
+  });
+});
+
+describe("ApiStack with PREWARM_SCHEDULE", () => {
+  it("should create EventBridge rules for each cron expression", () => {
+    const originalSchedule = process.env.PREWARM_SCHEDULE;
+    process.env.PREWARM_SCHEDULE = "0 9 ? * MON-FRI *,0 14 ? * SAT-SUN *";
+
+    try {
+      const app = new cdk.App();
+      const network = new NetworkStack(app, "PrewarmNetworkStack");
+      const storage = new StorageStack(app, "PrewarmStorageStack");
+      const auth = new AuthStack(app, "PrewarmAuthStack");
+      const compute = new ComputeStack(app, "PrewarmComputeStack", {
+        vpc: network.vpc,
+        fargateSecurityGroup: network.fargateSecurityGroup,
+        conversationsTable: storage.conversationsTable,
+        settingsTable: storage.settingsTable,
+        taskStateTable: storage.taskStateTable,
+        connectionsTable: storage.connectionsTable,
+        pendingMessagesTable: storage.pendingMessagesTable,
+        dataBucket: storage.dataBucket,
+        ecrRepository: storage.ecrRepository,
+      });
+      const api = new ApiStack(app, "PrewarmApiStack", {
+        vpc: network.vpc,
+        fargateSecurityGroup: network.fargateSecurityGroup,
+        conversationsTable: storage.conversationsTable,
+        settingsTable: storage.settingsTable,
+        taskStateTable: storage.taskStateTable,
+        connectionsTable: storage.connectionsTable,
+        pendingMessagesTable: storage.pendingMessagesTable,
+        userPool: auth.userPool,
+        userPoolClient: auth.userPoolClient,
+        cluster: compute.cluster,
+        taskDefinition: compute.taskDefinition,
+      });
+
+      const template = Template.fromStack(api);
+      // 1 watchdog + 2 prewarm = 3 rules
+      template.resourceCountIs("AWS::Events::Rule", 3);
+    } finally {
+      if (originalSchedule === undefined) {
+        delete process.env.PREWARM_SCHEDULE;
+      } else {
+        process.env.PREWARM_SCHEDULE = originalSchedule;
+      }
+    }
   });
 });

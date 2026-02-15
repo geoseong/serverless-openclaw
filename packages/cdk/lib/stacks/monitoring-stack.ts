@@ -13,6 +13,7 @@ const LAMBDA_FUNCTIONS = [
   "serverless-openclaw-telegram-webhook",
   "serverless-openclaw-api-handler",
   "serverless-openclaw-watchdog",
+  "serverless-openclaw-prewarm",
 ];
 
 const KEY_LAMBDA_FUNCTIONS = [
@@ -253,7 +254,70 @@ export class MonitoringStack extends cdk.Stack {
     );
 
     // ════════════════════════════════════════════════════════════════
-    //  Section 5: Infrastructure — ECS & DynamoDB
+    //  Section 5: Predictive Pre-Warming
+    // ════════════════════════════════════════════════════════════════
+
+    dashboard.addWidgets(
+      sectionHeader(
+        "Predictive Pre-Warming",
+        "Pre-warm triggers and skips. Triggered = new container started proactively. Skipped = existing container reused.",
+      ),
+    );
+
+    dashboard.addWidgets(
+      new cloudwatch.GraphWidget({
+        title: "Prewarm Events",
+        left: [
+          new cloudwatch.Metric({
+            namespace: NAMESPACE,
+            metricName: "PrewarmTriggered",
+            statistic: "Sum",
+            period: cdk.Duration.minutes(5),
+            label: "Triggered",
+          }),
+          new cloudwatch.Metric({
+            namespace: NAMESPACE,
+            metricName: "PrewarmSkipped",
+            statistic: "Sum",
+            period: cdk.Duration.minutes(5),
+            label: "Skipped",
+          }),
+        ],
+        width: 12,
+        height: 4,
+      }),
+      new cloudwatch.SingleValueWidget({
+        title: "Prewarm Triggered (24h)",
+        metrics: [
+          new cloudwatch.Metric({
+            namespace: NAMESPACE,
+            metricName: "PrewarmTriggered",
+            statistic: "Sum",
+            period: cdk.Duration.hours(24),
+            label: "Triggered",
+          }),
+        ],
+        width: 6,
+        height: 4,
+      }),
+      new cloudwatch.SingleValueWidget({
+        title: "Prewarm Skipped (24h)",
+        metrics: [
+          new cloudwatch.Metric({
+            namespace: NAMESPACE,
+            metricName: "PrewarmSkipped",
+            statistic: "Sum",
+            period: cdk.Duration.hours(24),
+            label: "Skipped",
+          }),
+        ],
+        width: 6,
+        height: 4,
+      }),
+    );
+
+    // ════════════════════════════════════════════════════════════════
+    //  Section 6: Infrastructure — ECS & DynamoDB
     // ════════════════════════════════════════════════════════════════
 
     dashboard.addWidgets(

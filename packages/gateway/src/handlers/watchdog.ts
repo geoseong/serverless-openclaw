@@ -128,6 +128,11 @@ export async function handler(): Promise<void> {
       continue;
     }
 
+    // Skip tasks under prewarm protection
+    if (item.prewarmUntil && now < item.prewarmUntil) {
+      continue;
+    }
+
     // Stop tasks that have been inactive too long
     const inactiveMs = now - lastActivity;
     if (inactiveMs > timeout) {

@@ -141,6 +141,18 @@ export class ApiStack extends cdk.Stack {
       environment: { ...commonEnv },
     });
 
+    const prewarmFn = new NodejsFunction(this, "PrewarmFn", {
+      ...nodejsFunctionDefaults,
+      functionName: "serverless-openclaw-prewarm",
+      entry: path.join(handlersDir, "prewarm.ts"),
+      handler: "handler",
+      environment: {
+        ...commonEnv,
+        PREWARM_DURATION: process.env.PREWARM_DURATION ?? "60",
+        METRICS_ENABLED: "true",
+      },
+    });
+
     // Pass SSM parameter paths — Lambda resolves SecureString at runtime via SDK
     const secretFunctions = [wsMessageFn, telegramWebhookFn, watchdogFn];
     for (const fn of secretFunctions) {
@@ -170,6 +182,7 @@ export class ApiStack extends cdk.Stack {
       telegramWebhookFn,
       apiHandlerFn,
       watchdogFn,
+      prewarmFn,
     ];
 
     const tables = [
@@ -187,7 +200,7 @@ export class ApiStack extends cdk.Stack {
     }
 
     // ECS + EC2 permissions for functions that need container management
-    const containerFunctions = [wsMessageFn, telegramWebhookFn, watchdogFn];
+    const containerFunctions = [wsMessageFn, telegramWebhookFn, watchdogFn, prewarmFn];
     for (const fn of containerFunctions) {
       fn.addToRolePolicy(
         new iam.PolicyStatement({
@@ -220,6 +233,14 @@ export class ApiStack extends cdk.Stack {
     watchdogFn.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ["cloudwatch:GetMetricStatistics"],
+        resources: ["*"],
+      }),
+    );
+
+    // CloudWatch write access for prewarm metrics
+    prewarmFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ["cloudwatch:PutMetricData"],
         resources: ["*"],
       }),
     );
@@ -333,6 +354,20 @@ export class ApiStack extends cdk.Stack {
       schedule: events.Schedule.rate(cdk.Duration.minutes(WATCHDOG_INTERVAL_MINUTES)),
       targets: [new targets.LambdaFunction(watchdogFn)],
     });
+
+    // ── EventBridge Rules — Prewarm (conditional) ──
+
+    const prewarmSchedule = process.env.PREWARM_SCHEDULE ?? "";
+    if (prewarmSchedule) {
+      const crons = prewarmSchedule.split(",").map((s) => s.trim());
+      crons.forEach((cron, i) => {
+        new events.Rule(this, `PrewarmRule${i}`, {
+          ruleName: `serverless-openclaw-prewarm-${i}`,
+          schedule: events.Schedule.expression(`cron(${cron})`),
+          targets: [new targets.LambdaFunction(prewarmFn)],
+        });
+      });
+    }
 
     // ── Outputs ──
 

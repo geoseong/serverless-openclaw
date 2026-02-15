@@ -60,7 +60,7 @@ export $(cat .env | xargs)
 serverless-openclaw/
 ├── packages/
 │   ├── shared/      # Shared types, constants (TABLE_NAMES, BRIDGE_PORT, etc.)
-│   ├── gateway/     # 6 Lambda handlers + 5 services
+│   ├── gateway/     # 7 Lambda handlers + 5 services
 │   ├── container/   # Fargate container (Bridge server + OpenClaw client)
 │   ├── web/         # React SPA (Vite + TypeScript)
 │   └── cdk/         # AWS CDK infrastructure definitions (6 stacks)
@@ -117,13 +117,13 @@ Defines shared types and constants. Since all other packages reference this, che
 
 ### gateway
 
-Consists of 6 Lambda handlers and 5 services.
+Consists of 7 Lambda handlers and 5 services.
 
 ```
 packages/gateway/
 ├── src/
 │   ├── handlers/    # ws-connect, ws-disconnect, ws-message,
-│   │                # telegram-webhook, api-handler, watchdog
+│   │                # telegram-webhook, api-handler, watchdog, prewarm
 │   ├── services/    # task-state, connections, conversations,
 │   │                # container, message, telegram
 │   └── index.ts     # Handler re-export
@@ -192,7 +192,7 @@ Consists of 6 CDK stacks.
 | StorageStack | 5 DynamoDB tables, S3, ECR |
 | AuthStack | Cognito User Pool, App Client |
 | ComputeStack | ECS cluster, Fargate Task Definition |
-| ApiStack | WebSocket API, HTTP API, 6 Lambda functions, EventBridge |
+| ApiStack | WebSocket API, HTTP API, 7 Lambda functions, EventBridge |
 | WebStack | S3 (web assets), CloudFront (OAC) |
 
 **Dependencies:** NetworkStack → StorageStack → {AuthStack, ComputeStack} → ApiStack → WebStack

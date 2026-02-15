@@ -28,6 +28,7 @@ graph TB
         TG_Webhook[telegram-webhook]
         API_Handler[api-handler]
         Watchdog[watchdog\nEventBridge Trigger]
+        Prewarm[prewarm\nEventBridge Cron]
     end
 
     subgraph "Authentication"
@@ -87,6 +88,8 @@ graph TB
     Fargate --> VPCE
     Watchdog --> DDB_Task
     Watchdog --> ECS
+    Prewarm --> DDB_Task
+    Prewarm --> ECS
 ```
 
 ---
@@ -153,7 +156,7 @@ Although Fargate can directly access the internet via Public IP, AWS service tra
 
 ## 3. Gateway Lambda Detailed Design
 
-Gateway Lambda is split into 6 independent functions following the single responsibility principle.
+Gateway Lambda is split into 7 independent functions following the single responsibility principle.
 
 ### 3.1 Function List
 
@@ -165,6 +168,7 @@ Gateway Lambda is split into 6 independent functions following the single respon
 | `telegram-webhook` | REST POST /telegram | Telegram message reception, routing | 30s |
 | `api-handler` | REST GET/POST /api/* | Settings query/update, conversation history | 10s |
 | `watchdog` | EventBridge (5-min interval) | Zombie task detection and termination | 60s |
+| `prewarm` | EventBridge (cron, optional) | Predictive pre-warming — proactively starts containers before scheduled usage | 30s |
 
 ### 3.2 WebSocket Message Processing Flow
 
@@ -851,7 +855,7 @@ graph TD
 | **StorageStack** | 5 DynamoDB tables, 2 S3 buckets, ECR repository | None |
 | **AuthStack** | Cognito User Pool, App Client | None |
 | **ComputeStack** | ECS Cluster, Fargate task definition, IAM roles | Network, Storage |
-| **ApiStack** | API Gateway (WS+REST), 6 Lambda functions, IAM roles | Network, Storage, Auth, Compute |
+| **ApiStack** | API Gateway (WS+REST), 7 Lambda functions, IAM roles, EventBridge rules | Network, Storage, Auth, Compute |
 | **WebStack** | S3 bucket (web), CloudFront distribution | Api (WebSocket URL injection) |
 
 ### Environment Variables and Configuration Injection
@@ -1011,4 +1015,5 @@ cdk deploy --all
 | `/serverless-openclaw/lambda/telegram` | 7 days | Lambda |
 | `/serverless-openclaw/lambda/api` | 7 days | Lambda |
 | `/serverless-openclaw/lambda/watchdog` | 7 days | Lambda |
+| `/serverless-openclaw/lambda/prewarm` | 7 days | Lambda |
 | `/serverless-openclaw/fargate/openclaw` | 14 days | Fargate |

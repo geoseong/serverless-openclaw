@@ -46,7 +46,7 @@ TypeScript: ES2022, Node16 module resolution, strict, composite builds. `.js` ex
 packages/
 ├── shared/      # Types + constants (TABLE_NAMES, BRIDGE_PORT, key prefixes)
 ├── cdk/         # CDK stacks (lib/stacks/)
-├── gateway/     # 6 Lambda handlers (ws-connect/message/disconnect, telegram-webhook, api-handler, watchdog)
+├── gateway/     # 7 Lambda handlers (ws-connect/message/disconnect, telegram-webhook, api-handler, watchdog, prewarm)
 ├── container/   # Fargate container (Bridge server + OpenClaw JSON-RPC client)
 └── web/         # React SPA (Vite, amazon-cognito-identity-js for auth)
 ```
@@ -106,7 +106,8 @@ Table names use the `TABLE_NAMES` constant from `@serverless-openclaw/shared`.
 - **Lambda secrets:** `{{resolve:ssm-secure:...}}` is NOT supported in Lambda env vars. Lambda functions receive SSM parameter paths as env vars (`SSM_BRIDGE_AUTH_TOKEN`, etc.) and resolve SecureString values at runtime via `resolveSecrets()` in `packages/gateway/src/services/secrets.ts`
 - **CDK deploy order for cross-stack changes:** Use `--exclusively` flag when deploying individual stacks to skip dependency resolution. See `docs/deployment.md` for migration procedures.
 - **Web build before CDK synth:** `packages/web/dist/` must exist before `cdk synth` because `BucketDeployment`'s `Source.asset()` validates the path
-- **CloudWatch Custom Metrics:** Namespace `ServerlessOpenClaw`, 8 metrics (startup phases, message latency, response length). Controlled by `METRICS_ENABLED` env var. MonitoringStack creates dashboard with 5 rows (cold start, messages, Lambda, API GW, ECS/DynamoDB)
+- **CloudWatch Custom Metrics:** Namespace `ServerlessOpenClaw`, 10 metrics (startup phases, message latency, response length, prewarm). Controlled by `METRICS_ENABLED` env var. MonitoringStack creates dashboard with 6 rows (cold start, messages, Lambda, API GW, prewarm, ECS/DynamoDB)
+- **Predictive Pre-Warming:** Optional EventBridge cron → prewarm Lambda → ECS RunTask with `USER_ID=system:prewarm`. Container claimed by first real user message (TaskState ownership transfer). Watchdog skips tasks where `now < prewarmUntil`. Configured via `PREWARM_SCHEDULE` (comma-separated crons) and `PREWARM_DURATION` (minutes, default 60) env vars. Disabled by default (no EventBridge rules created without schedule).
 - **Telegram-Web Identity Linking:** OTP-based linking via Settings table. Web UI generates 6-digit OTP -> Telegram `/link {code}` verifies and creates bilateral link records -> resolveUserId maps telegram userId to cognitoId for container sharing. Unlinking is Web-only (IDOR prevention). REST API: POST /link/generate-otp, GET /link/status, POST /link/unlink (all JWT-authenticated)
 - **HTTP API CORS:** `corsPreflight` required — Web (CloudFront) → API Gateway is cross-origin. `allowOrigins: ["*"]`, `allowHeaders: [Authorization, Content-Type]`
 

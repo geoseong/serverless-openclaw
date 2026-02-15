@@ -5,6 +5,7 @@ import {
   BRIDGE_PORT,
   BRIDGE_HTTP_TIMEOUT_MS,
   PENDING_MESSAGE_TTL_SEC,
+  PREWARM_USER_ID,
 } from "@serverless-openclaw/shared";
 import type {
   BridgeMessageRequest,
@@ -82,6 +83,35 @@ export async function routeMessage(deps: RouteDeps): Promise<RouteResult> {
       return "sent";
     } catch (err) {
       console.warn(`Bridge unreachable at ${taskState.publicIp}, falling back to pending queue`, err);
+    }
+  }
+
+  // Try to claim a pre-warmed container
+  if (!taskState) {
+    const prewarm = await deps.getTaskState(PREWARM_USER_ID);
+    if (prewarm?.status === "Running" && prewarm.publicIp) {
+      try {
+        await sendToBridge(deps.fetchFn, prewarm.publicIp, deps.bridgeAuthToken, {
+          userId: deps.userId,
+          message: deps.message,
+          channel: deps.channel,
+          connectionId: deps.connectionId,
+          callbackUrl: deps.callbackUrl,
+        });
+        // Transfer ownership: delete prewarm, create user entry
+        await deps.deleteTaskState(PREWARM_USER_ID);
+        await deps.putTaskState({
+          PK: `${KEY_PREFIX.USER}${deps.userId}`,
+          taskArn: prewarm.taskArn,
+          status: "Running",
+          publicIp: prewarm.publicIp,
+          startedAt: prewarm.startedAt,
+          lastActivity: new Date().toISOString(),
+        });
+        return "sent";
+      } catch {
+        // Bridge unreachable — fall through to normal path
+      }
     }
   }
 

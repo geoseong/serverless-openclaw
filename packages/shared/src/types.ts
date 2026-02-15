@@ -47,6 +47,7 @@ export interface TaskStateItem {
   startedAt: string;
   lastActivity: string;
   ttl?: number;
+  prewarmUntil?: number; // Unix timestamp (ms). Watchdog skips if now < this.
 }
 
 export interface ConnectionItem {

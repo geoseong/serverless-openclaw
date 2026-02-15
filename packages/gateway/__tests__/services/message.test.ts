@@ -187,6 +187,102 @@ describe("message service", () => {
       expect(mockFetch).not.toHaveBeenCalled();
     });
 
+    it("should claim a pre-warmed container when no user task exists", async () => {
+      const deps = makeDeps({
+        getTaskState: vi.fn()
+          .mockResolvedValueOnce(null) // user's task state
+          .mockResolvedValueOnce({     // prewarm task state
+            PK: "USER#system:prewarm",
+            status: "Running",
+            publicIp: "10.0.0.1",
+            taskArn: "arn:prewarm-task",
+            startedAt: "2024-01-01T00:00:00Z",
+            lastActivity: "2024-01-01T00:00:00Z",
+          }),
+      });
+
+      const result = await routeMessage(deps);
+
+      expect(result).toBe("sent");
+      expect(mockFetch).toHaveBeenCalledWith(
+        "http://10.0.0.1:8080/message",
+        expect.objectContaining({ method: "POST" }),
+      );
+      // Should delete prewarm TaskState
+      expect(deps.deleteTaskState).toHaveBeenCalledWith("system:prewarm");
+      // Should create user's TaskState with same taskArn/publicIp
+      expect(deps.putTaskState).toHaveBeenCalledWith(
+        expect.objectContaining({
+          PK: "USER#user-123",
+          taskArn: "arn:prewarm-task",
+          status: "Running",
+          publicIp: "10.0.0.1",
+        }),
+      );
+      // Should NOT start a new task
+      expect(deps.startTask).not.toHaveBeenCalled();
+    });
+
+    it("should fall through to normal path when prewarm bridge is unreachable", async () => {
+      const failFetch = vi.fn().mockRejectedValue(new Error("connect ECONNREFUSED"));
+      const deps = makeDeps({
+        fetchFn: failFetch,
+        getTaskState: vi.fn()
+          .mockResolvedValueOnce(null) // user's task state
+          .mockResolvedValueOnce({     // prewarm task state
+            PK: "USER#system:prewarm",
+            status: "Running",
+            publicIp: "10.0.0.1",
+            taskArn: "arn:prewarm-task",
+            startedAt: "2024-01-01T00:00:00Z",
+            lastActivity: "2024-01-01T00:00:00Z",
+          }),
+      });
+
+      const result = await routeMessage(deps);
+
+      // Should fall through to normal path (save pending + start new task)
+      expect(result).toBe("started");
+      expect(deps.savePendingMessage).toHaveBeenCalled();
+      expect(deps.startTask).toHaveBeenCalled();
+    });
+
+    it("should skip prewarm claim when prewarm task is Starting (no publicIp)", async () => {
+      const deps = makeDeps({
+        getTaskState: vi.fn()
+          .mockResolvedValueOnce(null) // user's task state
+          .mockResolvedValueOnce({     // prewarm task state — Starting, no IP
+            PK: "USER#system:prewarm",
+            status: "Starting",
+            taskArn: "arn:prewarm-task",
+            startedAt: "2024-01-01T00:00:00Z",
+            lastActivity: "2024-01-01T00:00:00Z",
+          }),
+      });
+
+      const result = await routeMessage(deps);
+
+      // Should fall through to normal path
+      expect(result).toBe("started");
+      expect(deps.savePendingMessage).toHaveBeenCalled();
+      expect(deps.startTask).toHaveBeenCalled();
+      expect(deps.deleteTaskState).not.toHaveBeenCalledWith("system:prewarm");
+    });
+
+    it("should skip prewarm claim when no prewarm task exists", async () => {
+      const deps = makeDeps({
+        getTaskState: vi.fn()
+          .mockResolvedValueOnce(null) // user's task state
+          .mockResolvedValueOnce(null), // prewarm task state — none
+      });
+
+      const result = await routeMessage(deps);
+
+      expect(result).toBe("started");
+      expect(deps.savePendingMessage).toHaveBeenCalled();
+      expect(deps.startTask).toHaveBeenCalled();
+    });
+
     it("should fallback on bridge connection refused: save pending + delete stale state + start new task", async () => {
       const failFetch = vi.fn().mockRejectedValue(new Error("connect ECONNREFUSED"));
       const deps = makeDeps({

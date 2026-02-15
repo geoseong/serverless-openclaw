@@ -32,6 +32,8 @@ cp .env.example .env
 #   AWS_REGION=ap-northeast-2
 #   FARGATE_CPU=1024       # optional (256/512/1024/2048/4096), default: 1024
 #   FARGATE_MEMORY=2048    # optional (must be compatible with CPU), default: 2048
+#   PREWARM_SCHEDULE=0 9 ? * MON-FRI *   # optional, comma-separated cron expressions
+#   PREWARM_DURATION=60                   # optional, minutes (default: 60)
 ```
 
 Then load the environment before running any AWS/CDK commands:

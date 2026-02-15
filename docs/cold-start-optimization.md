@@ -281,25 +281,34 @@ Version compatibility testing (2026-02-15):
 
 v2026.2.14 introduced a default-deny scope system requiring device pairing. Without paired device, `operator.write` scope is stripped, causing `chat.send` to fail. Pinned to v2026.2.13 (last compatible + fastest).
 
-#### P9: Predictive Pre-Warming (EventBridge Scheduled Scaling)
-
-**Status: Good cost/performance balance**
-
-Pre-launch a container before expected usage windows using EventBridge + Lambda.
-
-```
-EventBridge (cron: 0 9 ? * MON-FRI *) -> Lambda -> ECS RunTask
-```
+#### P9: Predictive Pre-Warming (EventBridge Scheduled Scaling) -- APPLIED
 
 | Item | Value |
 | ---- | ----- |
-| Expected impact | Eliminates cold start during scheduled hours |
+| Impact | Eliminates cold start during scheduled hours (**0s** first response) |
 | Cost | Only pay for actual running time (e.g., 8hr/day = ~$8-10/month) |
-| Implementation | EventBridge rule + Lambda to call RunTask |
-| Synergy | Works with existing dynamic watchdog (30min active / 10min inactive) |
-| Risk | Misses off-schedule usage; container idles during quiet hours |
+| Status | Applied (prewarm Lambda + EventBridge conditional rules) |
 
-This could extend the existing watchdog logic: if the current hour is a predicted active hour, pre-launch a container proactively rather than waiting for the first message.
+Pre-launches a container before expected usage windows using EventBridge cron + Lambda.
+
+```
+EventBridge (cron schedule) -> prewarm Lambda -> ECS RunTask (USER_ID=system:prewarm)
+                                              -> TaskState { prewarmUntil: now + duration }
+```
+
+**Configuration** (`.env`):
+```bash
+PREWARM_SCHEDULE="0 9 ? * MON-FRI *,0 14 ? * SAT-SUN *"  # comma-separated crons
+PREWARM_DURATION=60  # minutes (default: 60)
+```
+
+**Container claiming**: When a real user sends a message and no user-specific container is running, the system checks for a pre-warmed container (`system:prewarm`). If found and reachable, the message is routed to it and TaskState ownership is transferred from `system:prewarm` to the real user. No cold start delay.
+
+**Watchdog integration**: Pre-warmed containers have `prewarmUntil` timestamp in TaskState. The watchdog skips inactivity checks while `now < prewarmUntil`, preventing premature shutdown. After expiry, normal inactivity timeout applies.
+
+**Overlap handling**: If a container is already running when prewarm triggers, the Lambda extends `prewarmUntil` on the existing task instead of starting a new one.
+
+**Metrics**: `PrewarmTriggered` (new container started), `PrewarmSkipped` (existing container reused). Added to MonitoringStack dashboard.
 
 #### P10: Warm Standby Container (desiredCount=1)
 
@@ -409,7 +418,7 @@ Even with all optional services disabled, the core Gateway still requires a pers
 | ~~P6~~ | ~~zstd compression~~ | ~~-2.5s, -16% image~~ | ~~Free~~ | ~~APPLIED~~ |
 | ~~P7~~ | ~~CPU 2 vCPU~~ | ~~-9.5s (-14.5%)~~ | ~~+$0.01/session~~ | ~~APPLIED~~ |
 | ~~P8~~ | ~~OpenClaw version management~~ | ~~v2026.2.13 pinned (-7.4s)~~ | ~~Free~~ | ~~APPLIED~~ |
-| **P9** | Predictive pre-warming | Eliminates cold start (scheduled) | ~$8-10/month | Medium |
+| ~~P9~~ | ~~Predictive pre-warming~~ | ~~Eliminates cold start (scheduled)~~ | ~~$8-10/month~~ | ~~APPLIED~~ |
 | P10 | Warm standby (Spot) | Eliminates cold start | ~$10-12/month | Low |
 
 ### 2.5 Projected Cold Start

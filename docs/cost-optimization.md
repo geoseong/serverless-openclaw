@@ -180,6 +180,7 @@ AWS Secrets Manager charges $0.40/secret/month. With 5 secrets, this adds **$2.0
 | **Shorten CloudWatch log retention period** | Log storage cost savings | Limited debugging history |
 | **S3 Intelligent-Tiering** | Automatic cost reduction for inactive data | Negligible impact under 1GB |
 | **Compute Savings Plans** (1-year commitment) | Additional 50% discount on Fargate | Long-term commitment required |
+| **Predictive Pre-Warming** (EventBridge cron) | Eliminates ~68s cold start (0s first response) | Increased Fargate runtime (~$0.003/hr per pre-warmed container). Disabled by default |
 
 ---
 

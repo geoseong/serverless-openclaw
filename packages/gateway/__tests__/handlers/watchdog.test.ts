@@ -269,6 +269,74 @@ describe("watchdog handler", () => {
     expect(mockEcsSend).toHaveBeenCalledTimes(1); // only DescribeTasks, no StopTask
   });
 
+  it("should skip tasks under prewarm protection (prewarmUntil in the future)", async () => {
+    const { handler } = await import("../../src/handlers/watchdog.js");
+
+    const oldTime = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+    mockDynamoSend.mockResolvedValueOnce({
+      Items: [
+        {
+          PK: "USER#system:prewarm",
+          taskArn: "arn:prewarm-task",
+          status: "Running",
+          publicIp: "1.2.3.4",
+          startedAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+          lastActivity: oldTime,
+          prewarmUntil: Date.now() + 30 * 60 * 1000, // 30 min in the future
+        },
+      ],
+    });
+    // DescribeTasksCommand returns RUNNING
+    mockEcsSend.mockResolvedValueOnce({
+      tasks: [{ lastStatus: "RUNNING" }],
+    });
+
+    await handler();
+
+    // Should call DescribeTasks for ECS verification, but NOT StopTask
+    expect(mockEcsSend).toHaveBeenCalledTimes(1);
+    expect(mockEcsSend).toHaveBeenCalledWith(
+      expect.objectContaining({ _tag: "DescribeTasksCommand" }),
+    );
+  });
+
+  it("should stop tasks with expired prewarmUntil when inactive", async () => {
+    const { handler } = await import("../../src/handlers/watchdog.js");
+
+    const oldTime = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+    mockDynamoSend.mockResolvedValueOnce({
+      Items: [
+        {
+          PK: "USER#system:prewarm",
+          taskArn: "arn:prewarm-task",
+          status: "Running",
+          publicIp: "1.2.3.4",
+          startedAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+          lastActivity: oldTime,
+          prewarmUntil: Date.now() - 5 * 60 * 1000, // expired 5 min ago
+        },
+      ],
+    });
+    // DescribeTasksCommand returns RUNNING
+    mockEcsSend.mockResolvedValueOnce({
+      tasks: [{ lastStatus: "RUNNING" }],
+    });
+    mockEcsSend.mockResolvedValue({});
+    mockDynamoSend.mockResolvedValue({});
+
+    await handler();
+
+    // Should stop the task — prewarm expired and inactive > timeout
+    expect(mockEcsSend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          task: "arn:prewarm-task",
+          reason: expect.stringContaining("inactivity"),
+        }),
+      }),
+    );
+  });
+
   describe("dynamic timeout", () => {
     it("should use 30-min timeout during active hours (>= 2 datapoints at current hour)", async () => {
       const { handler } = await import("../../src/handlers/watchdog.js");
