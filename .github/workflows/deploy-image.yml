@@ -1,0 +1,94 @@
+name: Build and Deploy Container Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      skip-soci:
+        description: 'Skip SOCI index generation'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ap-northeast-2
+  ECR_REPOSITORY: serverless-openclaw
+  SOCI_VERSION: '0.12.1'
+
+jobs:
+  build-and-push:
+    name: Build, Push, and Index
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up QEMU (ARM64 emulation)
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push ARM64 image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: packages/container/Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
+            ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          provenance: false
+
+      - name: Install SOCI CLI
+        if: ${{ !inputs.skip-soci }}
+        run: |
+          wget -q "https://github.com/awslabs/soci-snapshotter/releases/download/v${SOCI_VERSION}/soci-snapshotter-${SOCI_VERSION}-linux-amd64.tar.gz"
+          sudo tar -xzf "soci-snapshotter-${SOCI_VERSION}-linux-amd64.tar.gz" -C /usr/local/bin soci
+          rm "soci-snapshotter-${SOCI_VERSION}-linux-amd64.tar.gz"
+          soci --version
+
+      - name: Generate and push SOCI index
+        if: ${{ !inputs.skip-soci }}
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+        run: |
+          IMAGE="${ECR_REGISTRY}/${ECR_REPOSITORY}:latest"
+          echo "Creating SOCI index for: ${IMAGE}"
+
+          # Ensure containerd is running (pre-installed on ubuntu runners)
+          sudo systemctl restart containerd
+          sudo systemctl is-active containerd
+
+          # Get ECR credentials for containerd
+          ECR_PASSWORD=$(aws ecr get-login-password --region "${AWS_REGION}")
+
+          # Pull image into containerd store
+          echo "Pulling image into containerd store..."
+          sudo ctr images pull --user "AWS:${ECR_PASSWORD}" --platform linux/arm64 "${IMAGE}"
+
+          # Create SOCI index
+          echo "Creating SOCI index..."
+          sudo soci create "${IMAGE}"
+
+          # Push SOCI index to ECR
+          echo "Pushing SOCI index to ECR..."
+          sudo soci push --user "AWS:${ECR_PASSWORD}" "${IMAGE}"
+
+          echo "SOCI index pushed successfully."
