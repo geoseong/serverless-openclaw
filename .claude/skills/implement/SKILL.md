@@ -1,37 +1,37 @@
 ---
 name: implement
-description: Phase 1 MVP 구현 단계를 안내합니다. 특정 단계 번호를 인자로 전달하면 해당 단계의 목표, 산출물, 검증 기준, 세부 설계를 제공합니다.
+description: Guides Phase 1 MVP implementation steps. Pass a specific step number as an argument to get the goals, deliverables, validation criteria, and detailed design for that step.
 argument-hint: "[step-number, e.g. 1-3]"
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep
 ---
 
-# Phase 1 MVP 구현 가이드
+# Phase 1 MVP Implementation Guide
 
-구현할 단계: **$ARGUMENTS**
+Step to implement: **$ARGUMENTS**
 
-## 구현 절차
+## Implementation Procedure
 
-1. 아래 레퍼런스에서 해당 단계의 목표, 산출물, 검증 기준을 확인
-2. 의존 단계가 완료되었는지 확인
-3. 산출물에 명시된 파일들을 생성/수정
-4. 검증 기준에 따라 결과 확인
-5. `docs/progress.md`의 해당 단계 상태를 업데이트
+1. Check the goals, deliverables, and validation criteria for the step in the references below
+2. Verify that dependent steps are completed
+3. Create/modify files specified in the deliverables
+4. Verify results according to validation criteria
+5. Update the step status in `docs/progress.md`
 
-## 레퍼런스
+## References
 
-- 구현 단계, 컨테이너/Bridge, Lambda 설계: [implementation-plan.md](../../../docs/implementation-plan.md)
+- Implementation steps, container/Bridge, Lambda design: [implementation-plan.md](../../../docs/implementation-plan.md)
 
-## 구현 시 필수 확인
+## Required Checks During Implementation
 
-- NAT Gateway가 생성되지 않는지 확인
-- 시크릿이 디스크에 기록되지 않는지 확인 (`openclaw.json`에 API 키/토큰 없어야 함)
-- RunTask에서 `launchType` 대신 `capacityProviderStrategy` 사용
-- Bridge 엔드포인트에 Bearer 토큰 인증 적용 (`/health` 제외)
-- userId는 서버 측 결정 (IDOR 방지)
-- Telegram은 webhook-only (config에서 `delete config.channels?.telegram`)
+- Verify no NAT Gateway is created
+- Verify no secrets are written to disk (no API keys/tokens in `openclaw.json`)
+- Use `capacityProviderStrategy` instead of `launchType` in RunTask
+- Apply Bearer token authentication to Bridge endpoints (except `/health`)
+- Determine userId server-side (IDOR prevention)
+- Telegram webhook-only (delete `config.channels?.telegram` from config)
 
-## 검증 후 작업
+## Post-Validation Tasks
 
-구현 완료 시:
-1. `docs/progress.md`에서 해당 단계 상태를 "완료"로 변경
-2. 관련 문서에 반영할 변경사항이 있는지 확인
+After implementation is complete:
+1. Change the step status to "Complete" in `docs/progress.md`
+2. Check if any related documents need to be updated

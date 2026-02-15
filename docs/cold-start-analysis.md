@@ -151,14 +151,16 @@ History load ─┘                                  │
                              IP discovery ───────┘ (background, non-blocking)
 ```
 
-### Priority 4: Inactivity Timeout Adjustment
+### Priority 4: Dynamic Inactivity Timeout
 
 | Item | Value |
 | ---- | ----- |
-| Expected impact | 50-75% reduction in cold start frequency |
-| Cost impact | 15min→30min: +$0.03/hr, 15min→60min: +$0.06/hr |
-| Implementation effort | Low (constant change) |
-| Risk | Increased cost |
+| Expected impact | 50-75% reduction in cold start frequency during active hours |
+| Cost impact | Near-neutral (+$0.25-0.35/mo) — shorter inactive hours offset longer active hours |
+| Implementation effort | Low-Medium (watchdog CloudWatch query + dynamic logic) |
+| Risk | Low (falls back to 15-min default when insufficient data) |
+
+Approach: Watchdog Lambda queries CloudWatch `MessageLatency` to detect active hours (KST). If the current hour-of-day had messages on >= 2 of the past 7 days, use 30-min timeout (active). Otherwise, use 10-min timeout (inactive). First 7 days fall back to the current 15-min default.
 
 ### Priority 5: Lambda Stale IP Timeout Fix
 
