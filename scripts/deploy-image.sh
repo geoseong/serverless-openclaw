@@ -1,12 +1,14 @@
 #!/bin/bash
 set -euo pipefail
 
-# Deploy container image to ECR with optional SOCI index
+# Deploy container image to ECR with zstd compression and optional SOCI index
 # Usage: ./scripts/deploy-image.sh [--soci]
+#
+# Uses zstd compression (level 3) for faster Fargate image pull.
 #
 # Prerequisites:
 #   - AWS CLI configured (profile via AWS_PROFILE or .env)
-#   - Docker running
+#   - Docker Buildx (included in Docker Desktop)
 #   - For --soci: soci CLI installed (Linux only)
 #     Install: https://github.com/awslabs/soci-snapshotter/releases
 
@@ -25,26 +27,26 @@ echo "=== Build & Deploy Container Image ==="
 echo "ECR: ${ECR_REPO}"
 echo "SOCI: ${ENABLE_SOCI}"
 
-# Step 1: Build
+# Step 1: Login to ECR (needed before buildx --push)
 echo ""
-echo "[1/4] Building Docker image..."
-docker build -t serverless-openclaw:latest -f packages/container/Dockerfile .
-
-# Step 2: Tag & Push
-echo ""
-echo "[2/4] Logging in to ECR..."
+echo "[1/3] Logging in to ECR..."
 aws ecr get-login-password --region "${REGION}" | \
   docker login --username AWS --password-stdin "${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com"
 
+# Step 2: Build & Push with zstd compression
 echo ""
-echo "[3/4] Pushing image to ECR..."
-docker tag serverless-openclaw:latest "${ECR_REPO}:latest"
-docker push "${ECR_REPO}:latest"
+echo "[2/3] Building and pushing Docker image (zstd compression)..."
+docker buildx build \
+  --platform linux/arm64 \
+  -t "${ECR_REPO}:latest" \
+  --provenance=false \
+  --output type=image,push=true,compression=zstd,compression-level=3,force-compression=true \
+  -f packages/container/Dockerfile .
 
 # Step 3: SOCI Index (optional, Linux only)
 if [ "${ENABLE_SOCI}" = true ]; then
   echo ""
-  echo "[4/4] Creating SOCI index..."
+  echo "[3/3] Creating SOCI index..."
 
   if ! command -v soci &> /dev/null; then
     echo "ERROR: soci CLI not found. Install from:"
@@ -67,13 +69,19 @@ if [ "${ENABLE_SOCI}" = true ]; then
   echo "SOCI index pushed to ECR. Fargate will use lazy loading on next task launch."
 else
   echo ""
-  echo "[4/4] Skipping SOCI index (use --soci to enable, Linux only)"
+  echo "[3/3] Skipping SOCI index (use --soci to enable, Linux only)"
 fi
 
 echo ""
 echo "=== Deploy complete ==="
 echo "Image: ${ECR_REPO}:latest"
 
-# Check image size
-IMAGE_SIZE=$(docker images serverless-openclaw:latest --format "{{.Size}}")
-echo "Image size: ${IMAGE_SIZE}"
+# Check image size in ECR
+IMAGE_SIZE=$(aws ecr describe-images --repository-name serverless-openclaw --image-ids imageTag=latest \
+  --query 'imageDetails[0].imageSizeInBytes' --output text --region "${REGION}" 2>/dev/null || echo "unknown")
+if [ "${IMAGE_SIZE}" != "unknown" ]; then
+  IMAGE_SIZE_MB=$((IMAGE_SIZE / 1024 / 1024))
+  echo "Image size (compressed): ${IMAGE_SIZE_MB} MB"
+else
+  echo "Image size: (could not retrieve)"
+fi

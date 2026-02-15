@@ -189,7 +189,7 @@ CPU scaling history:
 Measured by delta between Lambda REPORT timestamp and container first log:
 - Lambda 06:39:08 -> Container 06:39:43 = **~35 seconds**
 
-Docker image: 258 MB compressed (ECR), ~1.27 GB uncompressed.
+Docker image: 217 MB zstd compressed (ECR), ~1.27 GB uncompressed.
 
 #### Lambda Stale IP Timeout Issue (resolved)
 
@@ -214,31 +214,33 @@ Gateway init (~30-35s) remains the largest single bottleneck (~52% of total cold
 
 ### 2.2 Approaches Evaluated
 
-#### P6: zstd Container Image Compression
+#### P6: zstd Container Image Compression -- APPLIED
 
-**Status: Implementable**
+| Item | Value |
+| ---- | ----- |
+| Impact | Image size 258 MB -> 217 MB (-16%), First response -2.5s |
+| Cost | None |
+| Status | Applied (`scripts/deploy-image.sh`, `.github/workflows/deploy-image.yml`) |
 
-Standard gzip -> zstd compression reduces Fargate image pull + extraction time by up to 27%.
-
+Build command:
 ```bash
 docker buildx build \
   --platform linux/arm64 \
   -t $ECR_REPO:latest \
   --provenance=false \
-  --push \
-  --compression=zstd \
-  --force-compression=true \
-  --compression-level=3 \
+  --output type=image,push=true,compression=zstd,compression-level=3,force-compression=true \
   -f packages/container/Dockerfile .
 ```
 
-| Item | Value |
-| ---- | ----- |
-| Expected impact | ECS provisioning ~25s -> ~18s (~7s savings) |
-| Compatible with SOCI | Yes (Fargate auto-detects both) |
-| Requires | Fargate platform 1.4+ (current), Docker Buildx |
-| Cost | None |
-| Risk | None (transparent to application) |
+Measurement (GitHub issue #7):
+
+| Metric | Before (gzip) | After (zstd) | Delta |
+| ------ | -------------- | ------------- | ----- |
+| Image size (compressed) | 258 MB | 217 MB | -16% |
+| First response | 67.8s | 65.3s | -2.5s |
+| Stream complete | 69.9s | 65.7s | -4.2s |
+
+> Note: Single-run measurement. Variance between runs is expected (~3-5s) due to ECS provisioning and AI inference time differences.
 
 **Source**: [AWS Blog -- Reducing Fargate Startup with zstd](https://aws.amazon.com/blogs/containers/reducing-aws-fargate-startup-times-with-zstd-compressed-container-images/)
 
@@ -393,7 +395,7 @@ Even with all optional services disabled, the core Gateway still requires a pers
 
 | Priority | Approach | Impact | Cost | Effort |
 | -------- | -------- | ------ | ---- | ------ |
-| **P6** | zstd compression | ~7s savings | Free | Low |
+| ~~P6~~ | ~~zstd compression~~ | ~~-2.5s, -16% image~~ | ~~Free~~ | ~~APPLIED~~ |
 | **P7** | CPU 2 vCPU | ~10-15s savings | +$0.01/session | Low |
 | **P8** | OpenClaw version upgrade | Unknown | Free | Low |
 | **P9** | Predictive pre-warming | Eliminates cold start (scheduled) | ~$8-10/month | Medium |
@@ -403,9 +405,9 @@ Even with all optional services disabled, the core Gateway still requires a pers
 
 | Scenario | First Response |
 | -------- | -------------- |
-| Current (Phase 1 complete) | **63.9s** |
-| + P6 zstd compression | ~57s |
-| + P7 CPU 2 vCPU | ~42-47s |
+| Phase 1 complete | 63.9s |
+| **+ P6 zstd (current)** | **65.3s** (single measurement, within variance) |
+| + P7 CPU 2 vCPU | ~45-50s (estimated) |
 | + P9 Predictive pre-warming | **0s** (during active hours) |
 
 ---
@@ -417,7 +419,7 @@ Even with all optional services disabled, the core Gateway still requires a pers
 | Fargate CPU | 1 vCPU (1024) |
 | Fargate Memory | 2048 MB |
 | Architecture | ARM64 |
-| Docker Image | 258 MB (compressed) |
+| Docker Image | 217 MB (zstd compressed) |
 | OpenClaw Version | v2026.2.9 (latest: v2026.2.13) |
 | Inactivity Timeout | Dynamic (active: 30min / inactive: 10min) |
 | Lambda Runtime | Node.js 20 |

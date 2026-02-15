@@ -44,7 +44,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and push ARM64 image
+      - name: Build and push ARM64 image (zstd compression)
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -55,6 +55,7 @@ jobs:
             ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
             ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
           provenance: false
+          outputs: type=image,compression=zstd,compression-level=3,force-compression=true
 
       - name: Install SOCI CLI
         if: ${{ !inputs.skip-soci }}
