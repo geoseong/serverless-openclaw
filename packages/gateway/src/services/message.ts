@@ -3,6 +3,7 @@ import {
   TABLE_NAMES,
   KEY_PREFIX,
   BRIDGE_PORT,
+  BRIDGE_HTTP_TIMEOUT_MS,
   PENDING_MESSAGE_TTL_SEC,
 } from "@serverless-openclaw/shared";
 import type {
@@ -28,6 +29,7 @@ export async function sendToBridge(
       Authorization: `Bearer ${authToken}`,
     },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(BRIDGE_HTTP_TIMEOUT_MS),
   });
 
   if (!resp.ok) {
@@ -59,6 +61,7 @@ export interface RouteDeps {
   startTask: (params: StartTaskParams) => Promise<string>;
   putTaskState: (item: TaskStateItem) => Promise<void>;
   savePendingMessage: (item: PendingMessageItem) => Promise<void>;
+  deleteTaskState: (userId: string) => Promise<void>;
   startTaskParams: StartTaskParams;
 }
 
@@ -68,14 +71,18 @@ export async function routeMessage(deps: RouteDeps): Promise<RouteResult> {
   const taskState = await deps.getTaskState(deps.userId);
 
   if (taskState?.status === "Running" && taskState.publicIp) {
-    await sendToBridge(deps.fetchFn, taskState.publicIp, deps.bridgeAuthToken, {
-      userId: deps.userId,
-      message: deps.message,
-      channel: deps.channel,
-      connectionId: deps.connectionId,
-      callbackUrl: deps.callbackUrl,
-    });
-    return "sent";
+    try {
+      await sendToBridge(deps.fetchFn, taskState.publicIp, deps.bridgeAuthToken, {
+        userId: deps.userId,
+        message: deps.message,
+        channel: deps.channel,
+        connectionId: deps.connectionId,
+        callbackUrl: deps.callbackUrl,
+      });
+      return "sent";
+    } catch (err) {
+      console.warn(`Bridge unreachable at ${taskState.publicIp}, falling back to pending queue`, err);
+    }
   }
 
   // Save to pending messages
@@ -91,8 +98,11 @@ export async function routeMessage(deps: RouteDeps): Promise<RouteResult> {
     ttl: Math.floor(now / 1000) + PENDING_MESSAGE_TTL_SEC,
   });
 
-  // If no task at all, start one
-  if (!taskState) {
+  // If no task or stale Running state, clear stale state and start a new one
+  if (!taskState || (taskState.status === "Running" && taskState.publicIp)) {
+    if (taskState) {
+      await deps.deleteTaskState(deps.userId);
+    }
     const taskArn = await deps.startTask(deps.startTaskParams);
     await deps.putTaskState({
       PK: `${KEY_PREFIX.USER}${deps.userId}`,

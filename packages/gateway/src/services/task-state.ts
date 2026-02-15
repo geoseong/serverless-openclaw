@@ -1,4 +1,4 @@
-import { GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
+import { GetCommand, PutCommand, DeleteCommand } from "@aws-sdk/lib-dynamodb";
 import { TABLE_NAMES, KEY_PREFIX } from "@serverless-openclaw/shared";
 import type { TaskStateItem } from "@serverless-openclaw/shared";
 
@@ -28,6 +28,18 @@ export async function putTaskState(
     new PutCommand({
       TableName: TABLE_NAMES.TASK_STATE,
       Item: item,
+    }),
+  );
+}
+
+export async function deleteTaskState(
+  send: Send,
+  userId: string,
+): Promise<void> {
+  await send(
+    new DeleteCommand({
+      TableName: TABLE_NAMES.TASK_STATE,
+      Key: { PK: `${KEY_PREFIX.USER}${userId}` },
     }),
   );
 }

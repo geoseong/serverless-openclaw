@@ -19,7 +19,7 @@ describe("message service", () => {
   });
 
   describe("sendToBridge", () => {
-    it("should POST to bridge with Bearer token", async () => {
+    it("should POST to bridge with Bearer token and AbortSignal", async () => {
       await sendToBridge(mockFetch, "1.2.3.4", "my-token", {
         userId: "user-123",
         message: "hello",
@@ -37,6 +37,7 @@ describe("message service", () => {
             Authorization: "Bearer my-token",
           }),
           body: expect.any(String),
+          signal: expect.any(AbortSignal),
         }),
       );
 
@@ -61,6 +62,20 @@ describe("message service", () => {
           callbackUrl: "https://cb",
         }),
       ).rejects.toThrow("Bridge returned 500");
+    });
+
+    it("should pass an AbortSignal that is not immediately aborted", async () => {
+      await sendToBridge(mockFetch, "1.2.3.4", "token", {
+        userId: "u",
+        message: "m",
+        channel: "web",
+        connectionId: "c",
+        callbackUrl: "https://cb",
+      });
+
+      const signal = mockFetch.mock.calls[0][1].signal as AbortSignal;
+      expect(signal).toBeInstanceOf(AbortSignal);
+      expect(signal.aborted).toBe(false);
     });
   });
 
@@ -92,63 +107,59 @@ describe("message service", () => {
   });
 
   describe("routeMessage", () => {
-    it("should send to bridge when task is Running with publicIp", async () => {
-      const mockGetTaskState = vi.fn().mockResolvedValue({
-        PK: "USER#user-123",
-        status: "Running",
-        publicIp: "1.2.3.4",
-        taskArn: "arn:task",
-        startedAt: "2024-01-01T00:00:00Z",
-        lastActivity: "2024-01-01T00:00:00Z",
-      });
-      const mockStartTask = vi.fn();
-      const mockPutTaskState = vi.fn();
-      const mockSavePending = vi.fn();
+    const baseDeps = {
+      userId: "user-123",
+      message: "hello",
+      channel: "web" as const,
+      connectionId: "conn-1",
+      callbackUrl: "https://cb",
+      bridgeAuthToken: "token",
+      startTaskParams: { cluster: "c", taskDefinition: "td", subnets: ["s"], securityGroups: ["sg"], containerName: "openclaw", environment: [] },
+    };
 
-      await routeMessage({
-        userId: "user-123",
-        message: "hello",
-        channel: "web",
-        connectionId: "conn-1",
-        callbackUrl: "https://cb",
-        bridgeAuthToken: "token",
+    function makeDeps(overrides: Record<string, unknown> = {}) {
+      return {
+        ...baseDeps,
         fetchFn: mockFetch,
-        getTaskState: mockGetTaskState,
-        startTask: mockStartTask,
-        putTaskState: mockPutTaskState,
-        savePendingMessage: mockSavePending,
-        startTaskParams: { cluster: "c", taskDefinition: "td", subnets: ["s"], securityGroups: ["sg"], containerName: "openclaw", environment: [] },
+        getTaskState: vi.fn().mockResolvedValue(null),
+        startTask: vi.fn().mockResolvedValue("arn:new-task"),
+        putTaskState: vi.fn(),
+        savePendingMessage: vi.fn(),
+        deleteTaskState: vi.fn(),
+        ...overrides,
+      };
+    }
+
+    it("should send to bridge when task is Running with publicIp", async () => {
+      const deps = makeDeps({
+        getTaskState: vi.fn().mockResolvedValue({
+          PK: "USER#user-123",
+          status: "Running",
+          publicIp: "1.2.3.4",
+          taskArn: "arn:task",
+          startedAt: "2024-01-01T00:00:00Z",
+          lastActivity: "2024-01-01T00:00:00Z",
+        }),
       });
 
+      const result = await routeMessage(deps);
+
+      expect(result).toBe("sent");
       expect(mockFetch).toHaveBeenCalled();
-      expect(mockStartTask).not.toHaveBeenCalled();
+      expect(deps.startTask).not.toHaveBeenCalled();
+      expect(deps.deleteTaskState).not.toHaveBeenCalled();
     });
 
     it("should save pending + start task when no active task", async () => {
-      const mockGetTaskState = vi.fn().mockResolvedValue(null);
-      const mockStartTask = vi.fn().mockResolvedValue("arn:new-task");
-      const mockPutTaskState = vi.fn();
-      const mockSavePending = vi.fn();
+      const deps = makeDeps();
 
-      await routeMessage({
-        userId: "user-123",
-        message: "hello",
-        channel: "web",
-        connectionId: "conn-1",
-        callbackUrl: "https://cb",
-        bridgeAuthToken: "token",
-        fetchFn: mockFetch,
-        getTaskState: mockGetTaskState,
-        startTask: mockStartTask,
-        putTaskState: mockPutTaskState,
-        savePendingMessage: mockSavePending,
-        startTaskParams: { cluster: "c", taskDefinition: "td", subnets: ["s"], securityGroups: ["sg"], containerName: "openclaw", environment: [] },
-      });
+      const result = await routeMessage(deps);
 
+      expect(result).toBe("started");
       expect(mockFetch).not.toHaveBeenCalled();
-      expect(mockSavePending).toHaveBeenCalled();
-      expect(mockStartTask).toHaveBeenCalled();
-      expect(mockPutTaskState).toHaveBeenCalledWith(
+      expect(deps.savePendingMessage).toHaveBeenCalled();
+      expect(deps.startTask).toHaveBeenCalled();
+      expect(deps.putTaskState).toHaveBeenCalledWith(
         expect.objectContaining({
           PK: "USER#user-123",
           status: "Starting",
@@ -158,35 +169,96 @@ describe("message service", () => {
     });
 
     it("should save pending when task is Starting (no publicIp yet)", async () => {
-      const mockGetTaskState = vi.fn().mockResolvedValue({
-        PK: "USER#user-123",
-        status: "Starting",
-        taskArn: "arn:task",
-        startedAt: "2024-01-01T00:00:00Z",
-        lastActivity: "2024-01-01T00:00:00Z",
-      });
-      const mockStartTask = vi.fn();
-      const mockPutTaskState = vi.fn();
-      const mockSavePending = vi.fn();
-
-      await routeMessage({
-        userId: "user-123",
-        message: "hello",
-        channel: "web",
-        connectionId: "conn-1",
-        callbackUrl: "https://cb",
-        bridgeAuthToken: "token",
-        fetchFn: mockFetch,
-        getTaskState: mockGetTaskState,
-        startTask: mockStartTask,
-        putTaskState: mockPutTaskState,
-        savePendingMessage: mockSavePending,
-        startTaskParams: { cluster: "c", taskDefinition: "td", subnets: ["s"], securityGroups: ["sg"], containerName: "openclaw", environment: [] },
+      const deps = makeDeps({
+        getTaskState: vi.fn().mockResolvedValue({
+          PK: "USER#user-123",
+          status: "Starting",
+          taskArn: "arn:task",
+          startedAt: "2024-01-01T00:00:00Z",
+          lastActivity: "2024-01-01T00:00:00Z",
+        }),
       });
 
-      expect(mockSavePending).toHaveBeenCalled();
-      expect(mockStartTask).not.toHaveBeenCalled();
+      const result = await routeMessage(deps);
+
+      expect(result).toBe("queued");
+      expect(deps.savePendingMessage).toHaveBeenCalled();
+      expect(deps.startTask).not.toHaveBeenCalled();
       expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("should fallback on bridge connection refused: save pending + delete stale state + start new task", async () => {
+      const failFetch = vi.fn().mockRejectedValue(new Error("connect ECONNREFUSED"));
+      const deps = makeDeps({
+        fetchFn: failFetch,
+        getTaskState: vi.fn().mockResolvedValue({
+          PK: "USER#user-123",
+          status: "Running",
+          publicIp: "1.2.3.4",
+          taskArn: "arn:stale-task",
+          startedAt: "2024-01-01T00:00:00Z",
+          lastActivity: "2024-01-01T00:00:00Z",
+        }),
+      });
+
+      const result = await routeMessage(deps);
+
+      expect(result).toBe("started");
+      expect(deps.savePendingMessage).toHaveBeenCalled();
+      expect(deps.deleteTaskState).toHaveBeenCalledWith("user-123");
+      expect(deps.startTask).toHaveBeenCalled();
+      expect(deps.putTaskState).toHaveBeenCalledWith(
+        expect.objectContaining({
+          PK: "USER#user-123",
+          status: "Starting",
+          taskArn: "arn:new-task",
+        }),
+      );
+    });
+
+    it("should fallback on bridge timeout (AbortError)", async () => {
+      const abortError = new DOMException("The operation was aborted", "AbortError");
+      const failFetch = vi.fn().mockRejectedValue(abortError);
+      const deps = makeDeps({
+        fetchFn: failFetch,
+        getTaskState: vi.fn().mockResolvedValue({
+          PK: "USER#user-123",
+          status: "Running",
+          publicIp: "1.2.3.4",
+          taskArn: "arn:stale-task",
+          startedAt: "2024-01-01T00:00:00Z",
+          lastActivity: "2024-01-01T00:00:00Z",
+        }),
+      });
+
+      const result = await routeMessage(deps);
+
+      expect(result).toBe("started");
+      expect(deps.savePendingMessage).toHaveBeenCalled();
+      expect(deps.deleteTaskState).toHaveBeenCalledWith("user-123");
+      expect(deps.startTask).toHaveBeenCalled();
+    });
+
+    it("should fallback on bridge non-ok response (e.g. 502)", async () => {
+      const failFetch = vi.fn().mockResolvedValue({ ok: false, status: 502, statusText: "Bad Gateway" });
+      const deps = makeDeps({
+        fetchFn: failFetch,
+        getTaskState: vi.fn().mockResolvedValue({
+          PK: "USER#user-123",
+          status: "Running",
+          publicIp: "1.2.3.4",
+          taskArn: "arn:stale-task",
+          startedAt: "2024-01-01T00:00:00Z",
+          lastActivity: "2024-01-01T00:00:00Z",
+        }),
+      });
+
+      const result = await routeMessage(deps);
+
+      expect(result).toBe("started");
+      expect(deps.savePendingMessage).toHaveBeenCalled();
+      expect(deps.deleteTaskState).toHaveBeenCalledWith("user-123");
+      expect(deps.startTask).toHaveBeenCalled();
     });
   });
 });

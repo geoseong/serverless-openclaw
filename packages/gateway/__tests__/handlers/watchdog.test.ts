@@ -50,6 +50,10 @@ describe("watchdog handler", () => {
         },
       ],
     });
+    // DescribeTasksCommand returns RUNNING (task is alive but inactive)
+    mockEcsSend.mockResolvedValueOnce({
+      tasks: [{ lastStatus: "RUNNING" }],
+    });
     mockEcsSend.mockResolvedValue({});
     mockDynamoSend.mockResolvedValue({});
 
@@ -81,10 +85,18 @@ describe("watchdog handler", () => {
         },
       ],
     });
+    // DescribeTasksCommand returns RUNNING
+    mockEcsSend.mockResolvedValueOnce({
+      tasks: [{ lastStatus: "RUNNING" }],
+    });
 
     await handler();
 
-    expect(mockEcsSend).not.toHaveBeenCalled();
+    // Should only call DescribeTasks, not StopTask
+    expect(mockEcsSend).toHaveBeenCalledTimes(1);
+    expect(mockEcsSend).toHaveBeenCalledWith(
+      expect.objectContaining({ _tag: "DescribeTasksCommand" }),
+    );
   });
 
   it("should skip tasks with recent activity", async () => {
@@ -102,10 +114,18 @@ describe("watchdog handler", () => {
         },
       ],
     });
+    // DescribeTasksCommand returns RUNNING
+    mockEcsSend.mockResolvedValueOnce({
+      tasks: [{ lastStatus: "RUNNING" }],
+    });
 
     await handler();
 
-    expect(mockEcsSend).not.toHaveBeenCalled();
+    // Should only call DescribeTasks, not StopTask
+    expect(mockEcsSend).toHaveBeenCalledTimes(1);
+    expect(mockEcsSend).toHaveBeenCalledWith(
+      expect.objectContaining({ _tag: "DescribeTasksCommand" }),
+    );
   });
 
   it("should handle empty scan result", async () => {
@@ -175,6 +195,80 @@ describe("watchdog handler", () => {
     expect(mockDynamoSend).toHaveBeenCalledTimes(1); // only the scan
   });
 
+  it("should clean up stale Running entries when ECS task is actually stopped", async () => {
+    const { handler } = await import("../../src/handlers/watchdog.js");
+
+    const oldTime = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    mockDynamoSend.mockResolvedValueOnce({
+      Items: [
+        {
+          PK: "USER#user-1",
+          taskArn: "arn:task-stale-running",
+          status: "Running",
+          publicIp: "1.2.3.4",
+          startedAt: oldTime,
+          lastActivity: oldTime,
+        },
+      ],
+    });
+    // DescribeTasksCommand returns STOPPED
+    mockEcsSend.mockResolvedValueOnce({
+      tasks: [{ lastStatus: "STOPPED" }],
+    });
+    mockDynamoSend.mockResolvedValue({});
+
+    await handler();
+
+    // Should verify ECS task status before inactivity check
+    expect(mockEcsSend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        _tag: "DescribeTasksCommand",
+        input: expect.objectContaining({
+          cluster: "arn:cluster",
+          tasks: ["arn:task-stale-running"],
+        }),
+      }),
+    );
+
+    // Should delete the stale TaskState entry
+    expect(mockDynamoSend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          TableName: expect.stringContaining("TaskState"),
+          Key: { PK: "USER#user-1" },
+        }),
+      }),
+    );
+  });
+
+  it("should proceed with normal timeout logic when ECS task is still running", async () => {
+    const { handler } = await import("../../src/handlers/watchdog.js");
+
+    // Task with recent activity — should NOT be stopped
+    const recentActivity = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    mockDynamoSend.mockResolvedValueOnce({
+      Items: [
+        {
+          PK: "USER#user-1",
+          taskArn: "arn:task-running",
+          status: "Running",
+          publicIp: "1.2.3.4",
+          startedAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+          lastActivity: recentActivity,
+        },
+      ],
+    });
+    // DescribeTasksCommand returns RUNNING
+    mockEcsSend.mockResolvedValueOnce({
+      tasks: [{ lastStatus: "RUNNING" }],
+    });
+
+    await handler();
+
+    // Should NOT stop or delete — task is legitimately running with recent activity
+    expect(mockEcsSend).toHaveBeenCalledTimes(1); // only DescribeTasks, no StopTask
+  });
+
   describe("dynamic timeout", () => {
     it("should use 30-min timeout during active hours (>= 2 datapoints at current hour)", async () => {
       const { handler } = await import("../../src/handlers/watchdog.js");
@@ -204,11 +298,18 @@ describe("watchdog handler", () => {
           },
         ],
       });
+      // DescribeTasksCommand returns RUNNING
+      mockEcsSend.mockResolvedValueOnce({
+        tasks: [{ lastStatus: "RUNNING" }],
+      });
 
       await handler();
 
-      // Should NOT stop — 25 min < 30 min active timeout
-      expect(mockEcsSend).not.toHaveBeenCalled();
+      // Should only call DescribeTasks, not StopTask — 25 min < 30 min active timeout
+      expect(mockEcsSend).toHaveBeenCalledTimes(1);
+      expect(mockEcsSend).toHaveBeenCalledWith(
+        expect.objectContaining({ _tag: "DescribeTasksCommand" }),
+      );
     });
 
     it("should use 10-min timeout during inactive hours (< 2 total datapoints at current hour)", async () => {
@@ -241,6 +342,10 @@ describe("watchdog handler", () => {
             lastActivity,
           },
         ],
+      });
+      // DescribeTasksCommand returns RUNNING
+      mockEcsSend.mockResolvedValueOnce({
+        tasks: [{ lastStatus: "RUNNING" }],
       });
       mockEcsSend.mockResolvedValue({});
       mockDynamoSend.mockResolvedValue({});
@@ -276,11 +381,18 @@ describe("watchdog handler", () => {
           },
         ],
       });
+      // DescribeTasksCommand returns RUNNING
+      mockEcsSend.mockResolvedValueOnce({
+        tasks: [{ lastStatus: "RUNNING" }],
+      });
 
       await handler();
 
-      // Should NOT stop — 12 min < 15 min fallback
-      expect(mockEcsSend).not.toHaveBeenCalled();
+      // Should only call DescribeTasks, not StopTask — 12 min < 15 min fallback
+      expect(mockEcsSend).toHaveBeenCalledTimes(1);
+      expect(mockEcsSend).toHaveBeenCalledWith(
+        expect.objectContaining({ _tag: "DescribeTasksCommand" }),
+      );
     });
 
     it("should fall back to 15-min timeout when CW returns empty data", async () => {
@@ -300,6 +412,10 @@ describe("watchdog handler", () => {
             lastActivity,
           },
         ],
+      });
+      // DescribeTasksCommand returns RUNNING
+      mockEcsSend.mockResolvedValueOnce({
+        tasks: [{ lastStatus: "RUNNING" }],
       });
       mockEcsSend.mockResolvedValue({});
       mockDynamoSend.mockResolvedValue({});
@@ -365,11 +481,18 @@ describe("watchdog handler", () => {
           },
         ],
       });
+      // DescribeTasksCommand returns RUNNING
+      mockEcsSend.mockResolvedValueOnce({
+        tasks: [{ lastStatus: "RUNNING" }],
+      });
 
       await handler();
 
-      // Should NOT stop — 12 min < 15 min fallback (different-hour datapoints don't count)
-      expect(mockEcsSend).not.toHaveBeenCalled();
+      // Should only call DescribeTasks, not StopTask — 12 min < 15 min fallback
+      expect(mockEcsSend).toHaveBeenCalledTimes(1);
+      expect(mockEcsSend).toHaveBeenCalledWith(
+        expect.objectContaining({ _tag: "DescribeTasksCommand" }),
+      );
     });
   });
 });

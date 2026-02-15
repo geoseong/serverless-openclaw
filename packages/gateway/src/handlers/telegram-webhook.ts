@@ -3,7 +3,7 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { ECSClient } from "@aws-sdk/client-ecs";
 
-import { getTaskState, putTaskState } from "../services/task-state.js";
+import { getTaskState, putTaskState, deleteTaskState } from "../services/task-state.js";
 import { routeMessage, savePendingMessage } from "../services/message.js";
 import { startTask } from "../services/container.js";
 import { sendTelegramMessage } from "../services/telegram.js";
@@ -139,6 +139,7 @@ export async function handler(event: {
     startTask: (params) => startTask(ecsSend, params),
     putTaskState: (item) => putTaskState(dynamoSend, item),
     savePendingMessage: (item) => savePendingMessage(dynamoSend, item),
+    deleteTaskState: (uid) => deleteTaskState(dynamoSend, uid),
     startTaskParams: {
       cluster: process.env.ECS_CLUSTER_ARN ?? "",
       taskDefinition: process.env.TASK_DEFINITION_ARN ?? "",

@@ -103,6 +103,26 @@ export async function handler(): Promise<void> {
       continue;
     }
 
+    // Verify the ECS task is actually running — clean up stale "Running" entries
+    try {
+      const desc = await ecs.send(
+        new DescribeTasksCommand({ cluster, tasks: [item.taskArn] }),
+      );
+      const task = desc.tasks?.[0];
+      if (!task || task.lastStatus === "STOPPED") {
+        await ddb.send(
+          new DeleteCommand({ TableName: TABLE_NAMES.TASK_STATE, Key: { PK: item.PK } }),
+        );
+        continue;
+      }
+    } catch {
+      // Task not found — clean up stale entry
+      await ddb.send(
+        new DeleteCommand({ TableName: TABLE_NAMES.TASK_STATE, Key: { PK: item.PK } }),
+      );
+      continue;
+    }
+
     // Running tasks: don't stop if uptime is too short
     if (uptimeMs < MIN_UPTIME_MINUTES * 60 * 1000) {
       continue;
