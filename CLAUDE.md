@@ -82,6 +82,7 @@ Table names use the `TABLE_NAMES` constant from `@serverless-openclaw/shared`.
 
 ## Development Rules
 
+- **Documentation language: English** — All project documentation (`docs/`, `README.md`, code comments, commit messages, GitHub issues/PRs) must be written in English
 - **TDD required** — For all implementations except the UI (web package), write tests first before implementing
 - **Git Hooks:**
   - `pre-commit`: Must pass unit tests (vitest) + lint (eslint)
@@ -101,8 +102,8 @@ Table names use the `TABLE_NAMES` constant from `@serverless-openclaw/shared`.
 - **CDK deploy order for cross-stack changes:** Use `--exclusively` flag when deploying individual stacks to skip dependency resolution. See `docs/deployment.md` for migration procedures.
 - **Web build before CDK synth:** `packages/web/dist/` must exist before `cdk synth` because `BucketDeployment`'s `Source.asset()` validates the path
 - **CloudWatch Custom Metrics:** Namespace `ServerlessOpenClaw`, 8 metrics (startup phases, message latency, response length). Controlled by `METRICS_ENABLED` env var. MonitoringStack creates dashboard with 5 rows (cold start, messages, Lambda, API GW, ECS/DynamoDB)
-- **Telegram-Web Identity Linking:** OTP-based linking via Settings table. Web UI generates 6-digit OTP -> Telegram `/link {code}` verifies and creates bilateral link records -> resolveUserId maps telegram userId to cognitoId for container sharing. Unlinking is Web-only (IDOR prevention). REST API: POST /link/generate-otp, GET /link/status, POST /link/unlink (모두 JWT 인증)
-- **HTTP API CORS:** `corsPreflight` 설정 필수 — Web(CloudFront) → API Gateway는 크로스 오리진. `allowOrigins: ["*"]`, `allowHeaders: [Authorization, Content-Type]`
+- **Telegram-Web Identity Linking:** OTP-based linking via Settings table. Web UI generates 6-digit OTP -> Telegram `/link {code}` verifies and creates bilateral link records -> resolveUserId maps telegram userId to cognitoId for container sharing. Unlinking is Web-only (IDOR prevention). REST API: POST /link/generate-otp, GET /link/status, POST /link/unlink (all JWT-authenticated)
+- **HTTP API CORS:** `corsPreflight` required — Web (CloudFront) → API Gateway is cross-origin. `allowOrigins: ["*"]`, `allowHeaders: [Authorization, Content-Type]`
 
 ## Phase 1 Progress (10/10 — Complete)
 
@@ -118,3 +119,4 @@ Details: See `docs/progress.md`. Implementation guide: Use `/implement 1-{N}` sk
 - `docs/PRD.md` — Product requirements
 - `docs/deployment.md` — AWS deployment guide (secrets, build, deploy, verification)
 - `docs/development.md` — Local development guide (environment, TDD, coding rules)
+- `docs/cold-start-analysis.md` — Cold start performance analysis and optimization roadmap
