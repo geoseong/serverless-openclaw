@@ -7,10 +7,9 @@ import * as logs from "aws-cdk-lib/aws-logs";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as ssm from "aws-cdk-lib/aws-ssm";
-import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import type { Construct } from "constructs";
 import { BRIDGE_PORT, TABLE_NAMES } from "@serverless-openclaw/shared";
-import { SSM_PARAMS } from "./ssm-params.js";
+import { SSM_PARAMS, SSM_SECRETS } from "./ssm-params.js";
 
 export interface ComputeStackProps extends cdk.StackProps {
   vpc: ec2.IVpc;
@@ -32,26 +31,22 @@ export class ComputeStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: ComputeStackProps) {
     super(scope, id, props);
 
-    // Secrets Manager references (manually created)
-    const bridgeAuthToken = secretsmanager.Secret.fromSecretNameV2(
-      this,
-      "BridgeAuthToken",
-      "serverless-openclaw/bridge-auth-token",
+    // SSM SecureString parameter references (manually created)
+    const bridgeAuthToken = ssm.StringParameter.fromSecureStringParameterAttributes(
+      this, "BridgeAuthToken",
+      { parameterName: SSM_SECRETS.BRIDGE_AUTH_TOKEN },
     );
-    const openclawGatewayToken = secretsmanager.Secret.fromSecretNameV2(
-      this,
-      "OpenclawGatewayToken",
-      "serverless-openclaw/openclaw-gateway-token",
+    const openclawGatewayToken = ssm.StringParameter.fromSecureStringParameterAttributes(
+      this, "OpenclawGatewayToken",
+      { parameterName: SSM_SECRETS.OPENCLAW_GATEWAY_TOKEN },
     );
-    const anthropicApiKey = secretsmanager.Secret.fromSecretNameV2(
-      this,
-      "AnthropicApiKey",
-      "serverless-openclaw/anthropic-api-key",
+    const anthropicApiKey = ssm.StringParameter.fromSecureStringParameterAttributes(
+      this, "AnthropicApiKey",
+      { parameterName: SSM_SECRETS.ANTHROPIC_API_KEY },
     );
-    const telegramBotToken = secretsmanager.Secret.fromSecretNameV2(
-      this,
-      "TelegramBotToken",
-      "serverless-openclaw/telegram-bot-token",
+    const telegramBotToken = ssm.StringParameter.fromSecureStringParameterAttributes(
+      this, "TelegramBotToken",
+      { parameterName: SSM_SECRETS.TELEGRAM_BOT_TOKEN },
     );
 
     // ECS Cluster — FARGATE_SPOT only
@@ -94,10 +89,10 @@ export class ComputeStack extends cdk.Stack {
         METRICS_ENABLED: "true",
       },
       secrets: {
-        BRIDGE_AUTH_TOKEN: ecs.Secret.fromSecretsManager(bridgeAuthToken),
-        OPENCLAW_GATEWAY_TOKEN: ecs.Secret.fromSecretsManager(openclawGatewayToken),
-        ANTHROPIC_API_KEY: ecs.Secret.fromSecretsManager(anthropicApiKey),
-        TELEGRAM_BOT_TOKEN: ecs.Secret.fromSecretsManager(telegramBotToken),
+        BRIDGE_AUTH_TOKEN: ecs.Secret.fromSsmParameter(bridgeAuthToken),
+        OPENCLAW_GATEWAY_TOKEN: ecs.Secret.fromSsmParameter(openclawGatewayToken),
+        ANTHROPIC_API_KEY: ecs.Secret.fromSsmParameter(anthropicApiKey),
+        TELEGRAM_BOT_TOKEN: ecs.Secret.fromSsmParameter(telegramBotToken),
       },
       logging: ecs.LogDrivers.awsLogs({
         logGroup,
@@ -124,12 +119,6 @@ export class ComputeStack extends cdk.Stack {
       table.grantReadWriteData(this.taskRole);
     }
     props.dataBucket.grantReadWrite(this.taskRole);
-
-    // Secrets read access
-    bridgeAuthToken.grantRead(this.taskRole);
-    openclawGatewayToken.grantRead(this.taskRole);
-    anthropicApiKey.grantRead(this.taskRole);
-    telegramBotToken.grantRead(this.taskRole);
 
     // CloudWatch metrics publishing
     this.taskRole.addToPrincipalPolicy(

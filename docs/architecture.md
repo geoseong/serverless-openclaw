@@ -56,7 +56,6 @@ graph TB
 
     subgraph "Secrets"
         SSM[SSM Parameter Store]
-        SM[Secrets Manager]
     end
 
     User --> CF --> S3Web --> WebUI
@@ -148,7 +147,7 @@ Although Fargate can directly access the internet via Public IP, AWS service tra
 | DynamoDB | Gateway | Free | Frequent conversation history reads/writes |
 | S3 | Gateway | Free | File backup/configuration access |
 
-> **Note**: ECR, CloudWatch Logs, Secrets Manager, etc. are accessed via Fargate's Public IP through public endpoints. Interface Endpoints (~$7/month each) do not align with the cost target and are therefore not used.
+> **Note**: ECR, CloudWatch Logs, SSM Parameter Store, etc. are accessed via Fargate's Public IP through public endpoints. Interface Endpoints (~$7/month each) do not align with the cost target and are therefore not used.
 
 ---
 
@@ -603,8 +602,8 @@ sequenceDiagram
 
 | Secret | Storage | Accessed By |
 |--------|-------|----------|
-| Telegram Bot Token | Secrets Manager | Lambda (telegram-webhook) |
-| LLM API Keys (Claude, GPT, etc.) | Secrets Manager | Fargate (OpenClaw) |
+| Telegram Bot Token | SSM Parameter Store (SecureString) | Lambda (telegram-webhook) |
+| LLM API Keys (Claude, GPT, etc.) | SSM Parameter Store (SecureString) | Fargate (OpenClaw) |
 | Cognito Client Secret | SSM Parameter Store | Lambda (api-handler) |
 | WebSocket Callback URL | SSM Parameter Store | Fargate (Bridge) |
 | Database settings | Environment variables (CDK-injected) | Lambda, Fargate |
@@ -696,11 +695,11 @@ graph TD
 | Security Group | Allow inbound 8080 only, block all others | Port scanning, unnecessary service exposure | $0 |
 | Bridge Auth | `Authorization: Bearer <token>` validation. Required for all endpoints except `/health` | Unauthorized API calls | $0 |
 | Gateway localhost binding | `--bind localhost` — port 18789 only accessible within the container | Direct Gateway access blocked | $0 |
-| Token management | Stored in Secrets Manager, injected via environment variables. Never written to disk | Token leakage | ~$0.40/month |
+| Token management | Stored in SSM Parameter Store (SecureString), injected via environment variables. Never written to disk | Token leakage | $0 |
 | Non-root container | `USER openclaw` — runs as unprivileged user | Privilege escalation on container escape | $0 |
 | TLS | Self-signed certificate on Bridge (Node.js `https.createServer`) | Token sniffing (plaintext HTTP segment) | $0 |
 
-> **Cost Impact**: The entire multi-layer defense adds no cost beyond a single Secrets Manager secret ($0.40/month).
+> **Cost Impact**: The entire multi-layer defense adds no cost. SSM Parameter Store standard parameters are free.
 
 ### 7.6 Bridge Authentication Details
 
@@ -720,9 +719,9 @@ Bridge validation:
 ```
 
 **Token Lifecycle:**
-- Automatically generated in Secrets Manager during CDK deployment (32-byte random)
+- Manually created in SSM Parameter Store as SecureString (32-byte random via `openssl rand -hex 32`)
 - Same token injected into both Lambda environment variables and Fargate container environment variables
-- Token rotation: Secrets Manager automatic rotation + container restart to apply
+- Token rotation: Update SSM parameter + redeploy + container restart to apply
 
 ### 7.7 Container Security Hardening
 
@@ -732,7 +731,7 @@ Bridge validation:
 | Read-only root filesystem | `readonlyRootFilesystem: true` (Phase 2) | Prevent container tampering |
 | Gateway binding | `--bind localhost` | Block external exposure of port 18789 |
 | EXPOSE | 8080 only | 18789 is localhost-only, no exposure needed |
-| Secret delivery | Environment variables (Secrets Manager → ECS) | No API keys written to disk. Tokens not included in `openclaw.json` |
+| Secret delivery | Environment variables (SSM Parameter Store → ECS) | No API keys written to disk. Tokens not included in `openclaw.json` |
 | Home directory | `/home/openclaw/` | Uses non-root user home instead of `/root/` |
 
 ### 7.8 IDOR (Insecure Direct Object Reference) Prevention
@@ -800,9 +799,9 @@ Ensures that API keys, tokens, and other secrets are never written to the contai
 
 | Secret | Delivery Method | Written to Disk |
 |--------|----------|----------------|
-| ANTHROPIC_API_KEY | Secrets Manager → ECS environment variable | **Never** — not included in `openclaw.json` |
-| BRIDGE_AUTH_TOKEN | Secrets Manager → ECS environment variable | **Never** |
-| OPENCLAW_GATEWAY_TOKEN | Secrets Manager → ECS environment variable | **Never** — uses environment variable instead of CLI `--token` argument |
+| ANTHROPIC_API_KEY | SSM Parameter Store → ECS environment variable | **Never** — not included in `openclaw.json` |
+| BRIDGE_AUTH_TOKEN | SSM Parameter Store → ECS/Lambda environment variable | **Never** |
+| OPENCLAW_GATEWAY_TOKEN | SSM Parameter Store → ECS environment variable | **Never** — uses environment variable instead of CLI `--token` argument |
 | TELEGRAM_BOT_TOKEN | SSM Parameter Store → Lambda environment variable | **Never** — not passed to container (webhook-only approach) |
 
 **Caution When Patching Config:**
@@ -814,7 +813,7 @@ config.auth = { method: "env" }; // Reference environment variable instead of "a
 delete config.auth?.apiKey;       // Remove if it exists
 ```
 
-> **Difference from MoltWorker**: MoltWorker writes API keys directly to `openclaw.json` and backs them up to R2. We deliver them only via environment variables through Secrets Manager, ensuring secrets are not included in S3 backups.
+> **Difference from MoltWorker**: MoltWorker writes API keys directly to `openclaw.json` and backs them up to R2. We deliver them only via environment variables through SSM Parameter Store, ensuring secrets are not included in S3 backups.
 
 ---
 

@@ -5,7 +5,6 @@ import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as cognito from "aws-cdk-lib/aws-cognito";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as ssm from "aws-cdk-lib/aws-ssm";
-import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as events from "aws-cdk-lib/aws-events";
 import * as targets from "aws-cdk-lib/aws-events-targets";
 import {
@@ -24,7 +23,7 @@ import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import type { Construct } from "constructs";
 import { WATCHDOG_INTERVAL_MINUTES } from "@serverless-openclaw/shared";
-import { SSM_PARAMS } from "./ssm-params.js";
+import { SSM_PARAMS, SSM_SECRETS } from "./ssm-params.js";
 
 export interface ApiStackProps extends cdk.StackProps {
   vpc: ec2.IVpc;
@@ -48,24 +47,6 @@ export class ApiStack extends cdk.Stack {
 
     const monorepoRoot = path.join(__dirname, "..", "..", "..", "..");
     const handlersDir = path.join(monorepoRoot, "packages", "gateway", "src", "handlers");
-
-    // Secrets Manager references
-    const bridgeAuthToken = secretsmanager.Secret.fromSecretNameV2(
-      this,
-      "BridgeAuthToken",
-      "serverless-openclaw/bridge-auth-token",
-    );
-    const telegramBotToken = secretsmanager.Secret.fromSecretNameV2(
-      this,
-      "TelegramBotToken",
-      "serverless-openclaw/telegram-bot-token",
-    );
-    const telegramWebhookSecretName = "serverless-openclaw/telegram-webhook-secret";
-    const telegramWebhookSecret = secretsmanager.Secret.fromSecretNameV2(
-      this,
-      "TelegramWebhookSecret",
-      telegramWebhookSecretName,
-    );
 
     // Read compute resources from SSM (decoupled from ComputeStack)
     const taskDefArn = ssm.StringParameter.valueForStringParameter(this, SSM_PARAMS.TASK_DEFINITION_ARN);
@@ -160,18 +141,21 @@ export class ApiStack extends cdk.Stack {
       environment: { ...commonEnv },
     });
 
-    // Inject secrets as env vars
+    // Inject secrets as env vars (resolved at deploy time via {{resolve:ssm-secure:...}})
     const secretFunctions = [wsMessageFn, telegramWebhookFn, watchdogFn];
     for (const fn of secretFunctions) {
-      fn.addEnvironment("BRIDGE_AUTH_TOKEN", bridgeAuthToken.secretValue.unsafeUnwrap());
+      fn.addEnvironment(
+        "BRIDGE_AUTH_TOKEN",
+        cdk.SecretValue.ssmSecure(SSM_SECRETS.BRIDGE_AUTH_TOKEN).unsafeUnwrap(),
+      );
     }
     telegramWebhookFn.addEnvironment(
       "TELEGRAM_SECRET_TOKEN",
-      cdk.SecretValue.secretsManager(telegramWebhookSecretName).unsafeUnwrap(),
+      cdk.SecretValue.ssmSecure(SSM_SECRETS.TELEGRAM_WEBHOOK_SECRET).unsafeUnwrap(),
     );
     telegramWebhookFn.addEnvironment(
       "TELEGRAM_BOT_TOKEN",
-      telegramBotToken.secretValue.unsafeUnwrap(),
+      cdk.SecretValue.ssmSecure(SSM_SECRETS.TELEGRAM_BOT_TOKEN).unsafeUnwrap(),
     );
 
     // ── IAM Permissions for all Lambda functions ──
@@ -229,12 +213,13 @@ export class ApiStack extends cdk.Stack {
       );
     }
 
-    // Secrets read access
-    bridgeAuthToken.grantRead(wsMessageFn);
-    bridgeAuthToken.grantRead(telegramWebhookFn);
-    bridgeAuthToken.grantRead(watchdogFn);
-    telegramBotToken.grantRead(telegramWebhookFn);
-    telegramWebhookSecret.grantRead(telegramWebhookFn);
+    // CloudWatch read access for watchdog dynamic timeout
+    watchdogFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ["cloudwatch:GetMetricStatistics"],
+        resources: ["*"],
+      }),
+    );
 
     // ── WebSocket API ──
 

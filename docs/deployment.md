@@ -50,27 +50,30 @@ npx cdk bootstrap aws://<ACCOUNT_ID>/$AWS_REGION
 
 ---
 
-## 2. Secret Setup (Secrets Manager)
+## 2. Secret Setup (SSM Parameter Store)
 
-Before deployment, you must manually create 3 secrets in AWS Secrets Manager (5 if using Telegram).
+Before deployment, you must manually create 3 SSM SecureString parameters (5 if using Telegram).
 
 ```bash
 # Bridge auth token (for Lambda ↔ Fargate communication)
-aws secretsmanager create-secret \
-  --name "serverless-openclaw/bridge-auth-token" \
-  --secret-string "<YOUR_BRIDGE_TOKEN>" \
+aws ssm put-parameter \
+  --name "/serverless-openclaw/secrets/bridge-auth-token" \
+  --type SecureString \
+  --value "<YOUR_BRIDGE_TOKEN>" \
   --profile $AWS_PROFILE
 
 # OpenClaw Gateway token
-aws secretsmanager create-secret \
-  --name "serverless-openclaw/openclaw-gateway-token" \
-  --secret-string "<YOUR_GATEWAY_TOKEN>" \
+aws ssm put-parameter \
+  --name "/serverless-openclaw/secrets/openclaw-gateway-token" \
+  --type SecureString \
+  --value "<YOUR_GATEWAY_TOKEN>" \
   --profile $AWS_PROFILE
 
 # Anthropic API key
-aws secretsmanager create-secret \
-  --name "serverless-openclaw/anthropic-api-key" \
-  --secret-string "<YOUR_ANTHROPIC_API_KEY>" \
+aws ssm put-parameter \
+  --name "/serverless-openclaw/secrets/anthropic-api-key" \
+  --type SecureString \
+  --value "<YOUR_ANTHROPIC_API_KEY>" \
   --profile $AWS_PROFILE
 ```
 
@@ -86,12 +89,13 @@ aws secretsmanager create-secret \
 4. Enter a username ending with `bot` (e.g., `my_openclaw_bot`)
 5. BotFather will reply with an **HTTP API token** (e.g., `123456789:ABCdefGHI...`). Save this token.
 
-#### Step 2: Store the Token in Secrets Manager
+#### Step 2: Store the Token in SSM Parameter Store
 
 ```bash
-aws secretsmanager create-secret \
-  --name "serverless-openclaw/telegram-bot-token" \
-  --secret-string "<TOKEN_FROM_BOTFATHER>" \
+aws ssm put-parameter \
+  --name "/serverless-openclaw/secrets/telegram-bot-token" \
+  --type SecureString \
+  --value "<TOKEN_FROM_BOTFATHER>" \
   --profile $AWS_PROFILE
 ```
 
@@ -100,9 +104,10 @@ aws secretsmanager create-secret \
 The webhook secret is a separate random string used to verify that incoming webhook requests are from Telegram. It must **not** contain `:` characters (bot tokens are not suitable).
 
 ```bash
-aws secretsmanager create-secret \
-  --name "serverless-openclaw/telegram-webhook-secret" \
-  --secret-string "$(openssl rand -hex 32)" \
+aws ssm put-parameter \
+  --name "/serverless-openclaw/secrets/telegram-webhook-secret" \
+  --type SecureString \
+  --value "$(openssl rand -hex 32)" \
   --profile $AWS_PROFILE
 ```
 
@@ -206,7 +211,7 @@ chmod +x scripts/setup-telegram-webhook.sh
 ./scripts/setup-telegram-webhook.sh
 
 # Or manual registration
-# <TELEGRAM_SECRET_TOKEN> = value from serverless-openclaw/telegram-webhook-secret in Secrets Manager
+# <TELEGRAM_SECRET_TOKEN> = value from /serverless-openclaw/secrets/telegram-webhook-secret in SSM Parameter Store
 curl -X POST "https://api.telegram.org/bot<BOT_TOKEN>/setWebhook" \
   -H "Content-Type: application/json" \
   -d '{
@@ -241,7 +246,7 @@ aws cognito-idp admin-update-user-attributes \
   --profile $AWS_PROFILE
 ```
 
-> **Note:** `admin-create-user`는 SRP 인증과 호환되지 않습니다. 반드시 `sign-up` API를 사용하세요.
+> **Note:** `admin-create-user` is incompatible with SRP authentication. Use the `sign-up` API instead.
 
 ---
 
@@ -356,14 +361,14 @@ Error: Cannot find asset at /path/to/packages/web/dist
 **Cause:** Web UI build was not run beforehand
 **Solution:** `cd packages/web && npx vite build`
 
-### CDK deploy failure: `Secret not found`
+### CDK deploy failure: `Parameter not found`
 
 ```
-Error: Secrets Manager can't find the specified secret
+Error: SSM parameter not found
 ```
 
-**Cause:** Secrets not created in Secrets Manager
-**Solution:** See [2. Secret Setup](#2-secret-setup-secrets-manager)
+**Cause:** SSM SecureString parameters not created
+**Solution:** See [2. Secret Setup](#2-secret-setup-ssm-parameter-store)
 
 ### Fargate Task Startup Failure
 
@@ -374,7 +379,7 @@ aws logs tail /ecs/serverless-openclaw --follow --profile $AWS_PROFILE
 
 **Common causes:**
 - Image not pushed to ECR → build and push Docker image
-- Insufficient Secrets Manager access permissions → redeploy with CDK
+- Insufficient SSM parameter access permissions → redeploy with CDK
 - Insufficient memory → adjust `memoryLimitMiB` in `ComputeStack`
 
 ### WebSocket Connection Failure
@@ -391,5 +396,5 @@ curl "https://api.telegram.org/bot<BOT_TOKEN>/getWebhookInfo"
 
 **Common causes:**
 - Webhook URL not registered → run `scripts/setup-telegram-webhook.sh`
-- Secret token mismatch → verify Secrets Manager value matches the value used during webhook registration
+- Secret token mismatch → verify SSM parameter value matches the value used during webhook registration
 - Lambda error → check CloudWatch logs for `telegram-webhook` function

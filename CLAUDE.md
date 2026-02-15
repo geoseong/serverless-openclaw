@@ -61,7 +61,7 @@ Violating these rules will cause cost spikes or security incidents:
 - **No NAT Gateway** — `natGateways: 0` required. Use Fargate Public IP + VPC Gateway Endpoints
 - **No ALB, no Interface Endpoints** — Use API Gateway only
 - **DynamoDB PAY_PER_REQUEST** — Provisioned mode prohibited
-- **No secrets written to disk** — API keys/tokens delivered only via environment variables (Secrets Manager), not included in `openclaw.json`
+- **No secrets written to disk** — API keys/tokens delivered only via environment variables (SSM Parameter Store SecureString), not included in `openclaw.json`
 - **Telegram webhook-only** — Long polling prohibited (API rejects simultaneous use)
 - **Bridge Bearer token required** — For all endpoints except `/health`
 - **Server-side userId only** — Client-provided userId prohibited (IDOR prevention)
@@ -94,7 +94,7 @@ Table names use the `TABLE_NAMES` constant from `@serverless-openclaw/shared`.
 ## Key Design Patterns
 
 - **Cold Start Message Queuing:** Messages during container startup -> stored in PendingMessages DDB -> consumed after Bridge starts (5-minute TTL)
-- **Bridge 6-Layer Defense:** Security Group -> Bearer token -> TLS -> localhost binding -> non-root -> Secrets Manager
+- **Bridge 6-Layer Defense:** Security Group -> Bearer token -> TLS -> localhost binding -> non-root -> SSM Parameter Store
 - **Fargate Public IP Lookup:** DescribeTasks -> ENI ID -> DescribeNetworkInterfaces -> PublicIp
 - **OpenClaw Protocol:** JSON-RPC 2.0 / MCP over WebSocket, `?token=` query authentication
 - **WebSocket Auth:** API Gateway WebSocket does NOT support JWT authorizers. ws-connect Lambda verifies Cognito JWT from `?token=` query param using `aws-jwt-verify`

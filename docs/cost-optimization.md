@@ -7,7 +7,7 @@ Aggressive cost optimization applied using the Fargate Spot + API Gateway combin
 | Category | Within Free Tier (12 months) | After Free Tier Expiration |
 |----------|------------------------------|---------------------------|
 | **Before Optimization** (Fargate On-Demand) | ~$3-5/month | ~$5-10/month |
-| **After Optimization** (Fargate Spot) | **~$0.10/month** | **~$1-2/month** |
+| **After Optimization** (Fargate Spot + SSM) | **~$0.27/month** | **~$1.11/month** |
 | **Savings Rate** | ~97% | ~80% |
 
 ---
@@ -21,15 +21,15 @@ Aggressive cost optimization applied using the Fargate Spot + API Gateway combin
 | vCPU | $0.04048/hour | $0.01244/hour | **~70%** |
 | Memory (GB) | $0.00445/hour | $0.00137/hour | **~70%** |
 
-### Monthly Cost Calculation (0.25 vCPU, 0.5GB, 2 hours/day)
+### Monthly Cost Calculation (0.25 vCPU, 1GB, 2 hours/day)
 
 **Usage Hours**: 2 hours/day x 30 days = 60 hours/month
 
 | Item | On-Demand | Fargate Spot |
 |------|-----------|-------------|
 | vCPU (0.25) | $0.61 | **$0.19** |
-| Memory (0.5GB) | $0.13 | **$0.04** |
-| **Subtotal** | **$0.74** | **$0.23** |
+| Memory (1GB) | $0.27 | **$0.08** |
+| **Subtotal** | **$0.88** | **$0.27** |
 
 ### Fargate Spot Caveats
 
@@ -70,7 +70,7 @@ For personal use (low-traffic) environments, API Gateway saves **~$18-25/month**
 
 ### Assumptions
 - Region: us-east-1
-- Fargate Spot: 0.25 vCPU, 0.5GB, 2 hours/day (public subnet, Public IP assigned)
+- Fargate Spot: 0.25 vCPU, 1GB, 2 hours/day (public subnet, Public IP assigned)
 - 10,000 requests/month, 10 concurrent WebSocket connections, average 30 minutes of daily use
 - DynamoDB: 100K reads/writes per month
 - No NAT Gateway (direct internet access via Fargate Public IP)
@@ -81,7 +81,7 @@ For personal use (low-traffic) environments, API Gateway saves **~$18-25/month**
 
 | Service | Monthly Cost | Notes |
 |---------|-------------|-------|
-| ECS Fargate Spot | **$0.23** | Fargate has no separate Free Tier |
+| ECS Fargate Spot | **$0.27** | Fargate has no separate Free Tier |
 | API Gateway (WebSocket + REST) | $0.00 | 1M requests + 1M messages Free Tier |
 | DynamoDB | $0.00 | 25GB storage + 25 RCU/WCU Free Tier |
 | S3 | $0.00 | 5GB Free Tier |
@@ -89,14 +89,15 @@ For personal use (low-traffic) environments, API Gateway saves **~$18-25/month**
 | Cognito | $0.00 | 50,000 MAU always free |
 | CloudWatch | $0.00 | 5GB log ingestion Free Tier |
 | ECR | $0.00 | 500MB storage Free Tier |
+| Secrets (SSM SecureString) | $0.00 | Standard parameters are free |
 | VPC (Network) | $0.00 | No NAT Gateway, VPC Gateway Endpoints are free |
-| **Total** | **~$0.23/month** | |
+| **Total** | **~$0.27/month** | |
 
 ### After Free Tier Expiration
 
 | Service | Monthly Cost | Calculation Basis |
 |---------|-------------|-------------------|
-| ECS Fargate Spot | **$0.23** | vCPU: 0.25 x $0.01244 x 60h = $0.19, Mem: 0.5 x $0.00137 x 60h = $0.04 |
+| ECS Fargate Spot | **$0.27** | vCPU: 0.25 x $0.01244 x 60h = $0.19, Mem: 1 x $0.00137 x 60h = $0.08 |
 | API Gateway REST | $0.04 | 10K requests x $3.50/1M = $0.035 |
 | API Gateway WebSocket | $0.01 | 10K messages + ~13,500 connection minutes = ~$0.01 |
 | DynamoDB | $0.16 | 100K reads($0.025) + 100K writes($0.125) + 1GB storage($0.01) |
@@ -105,27 +106,30 @@ For personal use (low-traffic) environments, API Gateway saves **~$18-25/month**
 | Cognito | $0.00 | 50,000 MAU always free |
 | CloudWatch | $0.50 | 1GB log ingestion($0.50) |
 | ECR | $0.01 | ~100MB Docker image |
+| Secrets (SSM SecureString) | $0.00 | Standard parameters are free |
 | VPC (Network) | $0.00 | No NAT Gateway, VPC Gateway Endpoints are free |
-| **Total** | **~$1.07/month** | |
+| **Total** | **~$1.11/month** | |
 
 ---
 
 ## 4. Optimization Savings Summary vs On-Demand
 
 ```
-Before Optimization (assuming Fargate On-Demand + ALB):
-  Fargate On-Demand:  $0.74/month
+Before Optimization (assuming Fargate On-Demand + ALB + Secrets Manager):
+  Fargate On-Demand:  $0.88/month
   ALB:               $18.00/month
+  Secrets Manager:    $2.00/month  (5 secrets x $0.40)
   Other:              $1.00/month
-  Total:             ~$19.74/month
+  Total:             ~$21.88/month
 
-After Optimization (Fargate Spot + API Gateway):
-  Fargate Spot:       $0.23/month
+After Optimization (Fargate Spot + API Gateway + SSM SecureString):
+  Fargate Spot:       $0.27/month
   API Gateway:        $0.05/month
+  SSM SecureString:   $0.00/month  (standard parameters are free)
   Other:              $0.79/month
-  Total:             ~$1.07/month
+  Total:             ~$1.11/month
 
-Savings: ~$18.67/month (~95% reduction)
+Savings: ~$20.77/month (~95% reduction)
 ```
 
 ---
@@ -150,11 +154,28 @@ NAT Gateway incurs fixed costs even when idle, making it the largest cost driver
 
 ---
 
-## 6. Additional Cost Optimization Options
+## 6. Secrets Manager → SSM Parameter Store Migration
+
+AWS Secrets Manager charges $0.40/secret/month. With 5 secrets, this adds **$2.00/month** — nearly doubling the total infrastructure cost. SSM Parameter Store SecureString (standard tier) is **free**, providing identical functionality for secret storage.
+
+| Item | Secrets Manager | SSM SecureString |
+|------|----------------|-----------------|
+| Storage cost | $0.40/secret/month | $0 (standard tier) |
+| 5 secrets total | **$2.00/month** | **$0.00/month** |
+| API call cost | $0.05/10K calls | $0.05/10K calls (higher throughput free) |
+| Encryption | AWS KMS (default key) | AWS KMS (default `aws/ssm` key) |
+| ECS integration | `ecs.Secret.fromSecretsManager()` | `ecs.Secret.fromSsmParameter()` |
+| Lambda integration | `{{resolve:secretsmanager:...}}` | `{{resolve:ssm-secure:...}}` |
+
+**Migration impact**: Zero runtime changes. Both mechanisms inject secrets as plaintext environment variables. Container and Lambda code reads `process.env.*` identically regardless of the backing store.
+
+---
+
+## 7. Additional Cost Optimization Options
 
 | Strategy | Savings Impact | Tradeoff |
 |----------|---------------|----------|
-| **Reduce Fargate specs** (0.25 vCPU, 0.5GB -> maintain minimum) | Already at minimum specs | May limit OpenClaw performance |
+| **Reduce Fargate specs** (0.25 vCPU, 1GB -> maintain minimum) | Already at minimum specs | May limit OpenClaw performance |
 | **Shorten inactivity timeout** (15 min -> 5 min) | ~30% reduction in container runtime | Increased cold start frequency |
 | **Shorten CloudWatch log retention period** | Log storage cost savings | Limited debugging history |
 | **S3 Intelligent-Tiering** | Automatic cost reduction for inactive data | Negligible impact under 1GB |
@@ -162,7 +183,7 @@ NAT Gateway incurs fixed costs even when idle, making it the largest cost driver
 
 ---
 
-## 7. Alternative Reviewed but Not Adopted: Lambda Containers
+## 8. Alternative Reviewed but Not Adopted: Lambda Containers
 
 Using container-based Lambda instead of ECS Fargate Spot was evaluated but not adopted due to incompatibility with OpenClaw's characteristics.
 

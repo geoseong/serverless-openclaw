@@ -53,7 +53,7 @@ Inspired by the architecture of [Cloudflare MoltWorker](https://github.com/cloud
 
 - AWS Cognito-based JWT authentication — token verification applied to all API requests
 - HTTPS enforced (CloudFront + API Gateway)
-- Secrets managed via AWS Secrets Manager / SSM Parameter Store
+- Secrets managed via SSM Parameter Store SecureString
 - Least-privilege IAM roles applied to Fargate containers
 - Telegram webhook protected with secret token verification to prevent spoofing
 - Public subnet + multi-layer defense (Security Group + Bridge token authentication + TLS + localhost binding)
@@ -137,8 +137,8 @@ Extreme cost optimization applied with the Fargate Spot + API Gateway combinatio
 
 | Category | Monthly Cost |
 |----------|-------------|
-| Within Free Tier (12 months) | **~$0.23/month** |
-| After Free Tier expires | **~$1.07/month** |
+| Within Free Tier (12 months) | **~$0.27/month** |
+| After Free Tier expires | **~$1.11/month** |
 
 Key: Fargate Spot (~70% discount vs On-Demand) + API Gateway ($18-25/month savings vs ALB)
 
