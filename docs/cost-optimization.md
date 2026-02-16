@@ -182,6 +182,37 @@ AWS Secrets Manager charges $0.40/secret/month. With 5 secrets, this adds **$2.0
 | **Compute Savings Plans** (1-year commitment) | Additional 50% discount on Fargate | Long-term commitment required |
 | **Predictive Pre-Warming** (EventBridge cron) | Eliminates ~68s cold start (0s first response) | Increased Fargate runtime (~$0.003/hr per pre-warmed container). Disabled by default |
 
+### Predictive Pre-Warming Cost Impact
+
+Pre-warming starts a Fargate container proactively before users send messages, trading a small cost increase for zero cold start latency. Disabled by default.
+
+**Configuration:**
+
+```bash
+# .env
+PREWARM_SCHEDULE=0 9 ? * MON-FRI *    # Weekdays at 9 AM UTC
+PREWARM_DURATION=60                     # Keep container alive for 60 minutes
+```
+
+**Cost estimate** (1 vCPU, 2GB, Fargate Spot, ap-northeast-2):
+
+| Scenario | Additional Fargate Hours | Additional Cost |
+|----------|------------------------|-----------------|
+| 1 hour/day, weekdays only | ~22 hours/month | ~$0.07/month |
+| 2 hours/day, every day | ~60 hours/month | ~$0.19/month |
+| 8 hours/day, weekdays only | ~176 hours/month | ~$0.55/month |
+
+> Pre-warming cost is negligible (~$0.003/hour on Spot) compared to the UX improvement. If the user would have triggered a cold start anyway, the pre-warmed container is claimed and no additional cost is incurred.
+
+**When to enable:**
+- You have predictable usage patterns (e.g., work hours)
+- Cold start latency (~68s) is unacceptable for your workflow
+- The additional Fargate cost (~$0.003/hr) is acceptable
+
+**When NOT to enable:**
+- Unpredictable or very infrequent usage
+- Cost must stay at absolute minimum
+
 ---
 
 ## 8. Alternative Reviewed but Not Adopted: Lambda Containers

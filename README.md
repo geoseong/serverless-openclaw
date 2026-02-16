@@ -143,7 +143,22 @@ Extreme cost optimization applied with the Fargate Spot + API Gateway combinatio
 
 Key: Fargate Spot (~70% discount vs On-Demand) + API Gateway ($18-25/month savings vs ALB)
 
+**Predictive Pre-Warming** (optional): Adds ~$0.003/hour on Spot when enabled. A weekday 1-hour schedule costs ~$0.07/month extra but eliminates the ~68s cold start entirely.
+
 Detailed analysis: [Cost Optimization Document](docs/cost-optimization.md)
+
+### Pre-Warming Configuration
+
+Pre-warming is disabled by default. To enable, add to `.env`:
+
+```bash
+# Comma-separated EventBridge cron expressions
+PREWARM_SCHEDULE=0 9 ? * MON-FRI *          # Weekdays at 9 AM UTC
+# Duration in minutes to keep container alive (default: 60)
+PREWARM_DURATION=60
+```
+
+Then redeploy: `cd packages/cdk && npx cdk deploy ApiStack`
 
 ## Claude Code Skills
 
