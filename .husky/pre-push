@@ -1,1 +1,18 @@
+# Skip hooks for docs-only pushes (.md files only)
+# Check all commits being pushed (not yet on remote)
+REMOTE_SHA=$(git rev-parse @{u} 2>/dev/null || echo "")
+
+if [ -n "$REMOTE_SHA" ]; then
+  CHANGED_FILES=$(git diff --name-only "$REMOTE_SHA"..HEAD)
+else
+  CHANGED_FILES=$(git diff --name-only HEAD~1..HEAD)
+fi
+
+NON_DOC_FILES=$(echo "$CHANGED_FILES" | grep -v '\.md$' || true)
+
+if [ -z "$NON_DOC_FILES" ]; then
+  echo "Docs-only push — skipping E2E tests."
+  exit 0
+fi
+
 npm run test:e2e
