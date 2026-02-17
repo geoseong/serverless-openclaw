@@ -84,7 +84,7 @@ cd packages/cdk
 # With Telegram
 npx cdk deploy SecretsStack \
   --parameters "BridgeAuthToken=$(openssl rand -hex 32)" \
-  --parameters "OpenclawGatewayToken=<YOUR_GATEWAY_TOKEN>" \
+  --parameters "OpenclawGatewayToken=$(openssl rand -hex 32)" \
   --parameters "AnthropicApiKey=<YOUR_ANTHROPIC_API_KEY>" \
   --parameters "TelegramBotToken=<TOKEN_FROM_BOTFATHER>" \
   --parameters "TelegramWebhookSecret=$(openssl rand -hex 32)" \
@@ -93,11 +93,16 @@ npx cdk deploy SecretsStack \
 # Without Telegram (use placeholder values for Telegram parameters)
 npx cdk deploy SecretsStack \
   --parameters "BridgeAuthToken=$(openssl rand -hex 32)" \
-  --parameters "OpenclawGatewayToken=<YOUR_GATEWAY_TOKEN>" \
+  --parameters "OpenclawGatewayToken=$(openssl rand -hex 32)" \
   --parameters "AnthropicApiKey=<YOUR_ANTHROPIC_API_KEY>" \
   --parameters "TelegramBotToken=unused" \
   --parameters "TelegramWebhookSecret=unused" \
   --profile $AWS_PROFILE
+```
+
+> On subsequent deploys (`cdk deploy --all`), SecretsStack parameters are automatically reused — no need to provide them again.
+
+> **나중에 Telegram 추가하기**: "Without Telegram"으로 배포한 후 Telegram을 추가하려면 [Telegram 나중에 추가하기 가이드](../dev/add-telegram-later.md)를 참고하세요.
 ```
 
 > On subsequent deploys (`cdk deploy --all`), SecretsStack parameters are automatically reused — no need to provide them again.
