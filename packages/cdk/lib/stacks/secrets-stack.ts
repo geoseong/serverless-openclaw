@@ -8,6 +8,9 @@ const SECRET_PARAMS = [
   { id: "BridgeAuthToken", path: SSM_SECRETS.BRIDGE_AUTH_TOKEN, desc: "Bridge auth token" },
   { id: "OpenclawGatewayToken", path: SSM_SECRETS.OPENCLAW_GATEWAY_TOKEN, desc: "OpenClaw Gateway token" },
   { id: "AnthropicApiKey", path: SSM_SECRETS.ANTHROPIC_API_KEY, desc: "Anthropic API key" },
+  { id: "OpenAIApiKey", path: SSM_SECRETS.OPENAI_API_KEY, desc: "OpenAI API key" },
+  { id: "OpenRouterApiKey", path: SSM_SECRETS.OPENROUTER_API_KEY, desc: "OpenRouter API key" },
+  { id: "OllamaApiKey", path: SSM_SECRETS.OLLAMA_API_KEY, desc: "Ollama API key" },
   { id: "TelegramBotToken", path: SSM_SECRETS.TELEGRAM_BOT_TOKEN, desc: "Telegram bot token" },
   { id: "TelegramWebhookSecret", path: SSM_SECRETS.TELEGRAM_WEBHOOK_SECRET, desc: "Telegram webhook secret" },
 ] as const;

@@ -221,11 +221,22 @@ aws ecr get-login-password --region $AWS_REGION --profile $AWS_PROFILE \
 
 ### 5-2. Docker 이미지 빌드 및 푸시
 
+**ECR(Elastic Container Registry) 동작 원리**:
+- ECR은 AWS의 Docker 이미지 저장소 (Docker Hub의 AWS 버전)
+- Fargate는 ECR에서 이미지를 가져와서 컨테이너 실행
+- 인증 시 username은 항상 `AWS`, password는 12시간 유효한 임시 토큰 사용
+- 참고: [AWS ECR 인증 공식 문서](https://docs.aws.amazon.com/AmazonECR/latest/userguide/registry_auth.html)
+
+**빌드 및 푸시 과정**:
+1. 로컬에서 Docker 이미지 빌드 (`serverless-openclaw:latest`)
+2. ECR 경로로 태그 추가 (같은 이미지에 ECR 주소 붙이기)
+3. ECR에 푸시 (AWS 클라우드로 업로드)
+
 ```bash
-# 이미지 빌드
+# 이미지 빌드 (OpenClaw 다운로드 포함, 시간 소요)
 docker build -f packages/container/Dockerfile -t serverless-openclaw .
 
-# 이미지 태그
+# 이미지 태그 (ECR 경로 추가)
 docker tag serverless-openclaw:latest $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/serverless-openclaw:latest
 
 # ECR에 푸시

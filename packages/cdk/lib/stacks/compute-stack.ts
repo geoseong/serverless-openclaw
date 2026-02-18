@@ -52,6 +52,18 @@ export class ComputeStack extends cdk.Stack {
       this, "TelegramBotToken",
       { parameterName: SSM_SECRETS.TELEGRAM_BOT_TOKEN },
     );
+    const openaiApiKey = ssm.StringParameter.fromSecureStringParameterAttributes(
+      this, "OpenAIApiKey",
+      { parameterName: SSM_SECRETS.OPENAI_API_KEY },
+    );
+    const openrouterApiKey = ssm.StringParameter.fromSecureStringParameterAttributes(
+      this, "OpenRouterApiKey",
+      { parameterName: SSM_SECRETS.OPENROUTER_API_KEY },
+    );
+    const ollamaApiKey = ssm.StringParameter.fromSecureStringParameterAttributes(
+      this, "OllamaApiKey",
+      { parameterName: SSM_SECRETS.OLLAMA_API_KEY },
+    );
 
     // ECS Cluster — FARGATE_SPOT only
     this.cluster = new ecs.Cluster(this, "Cluster", {
@@ -96,6 +108,9 @@ export class ComputeStack extends cdk.Stack {
         BRIDGE_AUTH_TOKEN: ecs.Secret.fromSsmParameter(bridgeAuthToken),
         OPENCLAW_GATEWAY_TOKEN: ecs.Secret.fromSsmParameter(openclawGatewayToken),
         ANTHROPIC_API_KEY: ecs.Secret.fromSsmParameter(anthropicApiKey),
+        OPENAI_API_KEY: ecs.Secret.fromSsmParameter(openaiApiKey),
+        OPENROUTER_API_KEY: ecs.Secret.fromSsmParameter(openrouterApiKey),
+        OLLAMA_API_KEY: ecs.Secret.fromSsmParameter(ollamaApiKey),
         TELEGRAM_BOT_TOKEN: ecs.Secret.fromSsmParameter(telegramBotToken),
       },
       logging: ecs.LogDrivers.awsLogs({

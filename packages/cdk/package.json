@@ -2,10 +2,14 @@
   "name": "@serverless-openclaw/cdk",
   "version": "0.1.0",
   "private": true,
-  "scripts": { "build": "tsc", "synth": "cdk synth", "deploy": "cdk deploy" },
+  "scripts": {
+    "build": "tsc",
+    "synth": "cdk synth",
+    "deploy": "cdk deploy"
+  },
   "dependencies": {
     "@serverless-openclaw/shared": "*",
-    "aws-cdk-lib": "^2.170.0",
+    "aws-cdk-lib": "^2.106.0",
     "constructs": "^10.4.0",
     "source-map-support": "^0.5.21"
   },
