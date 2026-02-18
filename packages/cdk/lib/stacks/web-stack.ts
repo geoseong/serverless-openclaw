@@ -65,8 +65,19 @@ export class WebStack extends cdk.Stack {
     // Deploy web build assets to S3
     const webDistPath = path.join(__dirname, "..", "..", "..", "..", "packages", "web", "dist");
 
+    // Create runtime config with CloudFormation outputs
+    const runtimeConfig = {
+      cognitoUserPoolId: props.userPoolId,
+      cognitoClientId: props.userPoolClientId,
+      webSocketUrl: props.webSocketUrl,
+      apiUrl: props.apiUrl,
+    };
+
     new s3deploy.BucketDeployment(this, "WebDeployment", {
-      sources: [s3deploy.Source.asset(webDistPath)],
+      sources: [
+        s3deploy.Source.asset(webDistPath),
+        s3deploy.Source.jsonData("config.json", runtimeConfig),
+      ],
       destinationBucket: this.webBucket,
       distribution: this.distribution,
       distributionPaths: ["/*"],

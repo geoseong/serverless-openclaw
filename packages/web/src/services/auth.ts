@@ -5,11 +5,20 @@ import {
   CognitoUserSession,
   CognitoUserAttribute,
 } from "amazon-cognito-identity-js";
+import { getConfig } from "../config";
 
-const userPool = new CognitoUserPool({
-  UserPoolId: import.meta.env.VITE_COGNITO_USER_POOL_ID,
-  ClientId: import.meta.env.VITE_COGNITO_CLIENT_ID,
-});
+let userPool: CognitoUserPool | null = null;
+
+function getUserPool(): CognitoUserPool {
+  if (!userPool) {
+    const config = getConfig();
+    userPool = new CognitoUserPool({
+      UserPoolId: config.cognitoUserPoolId,
+      ClientId: config.cognitoClientId,
+    });
+  }
+  return userPool;
+}
 
 export type SignInResult =
   | { type: "success"; session: CognitoUserSession }
@@ -17,7 +26,8 @@ export type SignInResult =
   | { type: "mfaRequired"; user: CognitoUser };
 
 export function signIn(email: string, password: string): Promise<SignInResult> {
-  const user = new CognitoUser({ Username: email, Pool: userPool });
+  const pool = getUserPool();
+  const user = new CognitoUser({ Username: email, Pool: pool });
   const authDetails = new AuthenticationDetails({ Username: email, Password: password });
 
   return new Promise((resolve, reject) => {
@@ -60,10 +70,11 @@ export function sendMFACode(user: CognitoUser, totpCode: string): Promise<Cognit
 }
 
 export function signUp(email: string, password: string): Promise<CognitoUser> {
+  const pool = getUserPool();
   const attributes = [new CognitoUserAttribute({ Name: "email", Value: email })];
 
   return new Promise((resolve, reject) => {
-    userPool.signUp(email, password, attributes, [], (err, result) => {
+    pool.signUp(email, password, attributes, [], (err, result) => {
       if (err || !result) {
         reject(err ?? new Error("Sign up failed"));
         return;
@@ -74,7 +85,8 @@ export function signUp(email: string, password: string): Promise<CognitoUser> {
 }
 
 export function confirmSignUp(email: string, code: string): Promise<void> {
-  const user = new CognitoUser({ Username: email, Pool: userPool });
+  const pool = getUserPool();
+  const user = new CognitoUser({ Username: email, Pool: pool });
 
   return new Promise((resolve, reject) => {
     user.confirmRegistration(code, true, (err) => {
@@ -88,7 +100,8 @@ export function confirmSignUp(email: string, code: string): Promise<void> {
 }
 
 export function getSession(): Promise<CognitoUserSession | null> {
-  const user = userPool.getCurrentUser();
+  const pool = getUserPool();
+  const user = pool.getCurrentUser();
   if (!user) return Promise.resolve(null);
 
   return new Promise((resolve, reject) => {
@@ -103,11 +116,13 @@ export function getSession(): Promise<CognitoUserSession | null> {
 }
 
 export function getCurrentUser(): CognitoUser | null {
-  return userPool.getCurrentUser();
+  const pool = getUserPool();
+  return pool.getCurrentUser();
 }
 
 export function signOut(): void {
-  const user = userPool.getCurrentUser();
+  const pool = getUserPool();
+  const user = pool.getCurrentUser();
   if (user) {
     user.signOut();
   }

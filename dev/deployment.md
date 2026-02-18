@@ -308,6 +308,42 @@ aws cognito-idp admin-confirm-sign-up \
 2. 생성한 계정으로 로그인
 3. 채팅 메시지 전송 테스트
 
+### 7-3. Runtime Config 동작 원리 (참고)
+
+**문제**: Web UI가 Cognito 설정을 어떻게 알아야 할까?
+
+**해결**: Runtime Config 방식 사용
+- WebStack 배포 시 `config.json` 자동 생성 및 S3 배포
+- 브라우저가 앱 로드 시 `/config.json` 요청
+- CloudFormation Output 값들이 자동으로 주입됨
+
+**장점**:
+- `.env` 파일에 plain 값 저장 불필요
+- CloudFormation Output 변경 시 WebStack만 재배포
+- Web 재빌드 불필요
+- 값 변경이 자동으로 반영됨
+
+**config.json 내용** (자동 생성):
+```json
+{
+  "cognitoUserPoolId": "ap-northeast-2_lpJNz3cLy",
+  "cognitoClientId": "4f6ucnfrf433v672kql4q3oudv",
+  "webSocketUrl": "wss://xxx.execute-api.amazonaws.com/prod",
+  "apiUrl": "https://xxx.execute-api.amazonaws.com"
+}
+```
+
+**보안**: 이 값들은 공개되어도 안전함
+- Cognito User Pool ID/Client ID는 브라우저 앱에서 필수로 노출
+- 실제 인증은 사용자 이메일/비밀번호로 이루어짐
+- API 접근은 Cognito JWT 토큰으로 보호됨
+- 민감한 값(API Key 등)은 SSM Parameter에 암호화 저장
+
+**구현 위치**:
+- `packages/cdk/lib/stacks/web-stack.ts`: config.json 생성
+- `packages/web/src/config.ts`: config 로드 로직
+- `packages/web/src/main.tsx`: 앱 시작 전 config 로드
+
 ---
 
 ## 흔한 문제 및 해결 방법
