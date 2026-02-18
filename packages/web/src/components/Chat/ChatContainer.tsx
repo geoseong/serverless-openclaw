@@ -5,14 +5,14 @@ import { AgentStatus } from "../Status/AgentStatus";
 import { MessageList } from "./MessageList";
 import { MessageInput } from "./MessageInput";
 import { TelegramLink } from "../Settings/TelegramLink";
+import { getConfig } from "../../config";
 import "./ChatContainer.css";
 
-const WS_URL = import.meta.env.VITE_WS_URL;
-
 export function ChatContainer() {
+  const config = getConfig();
   const { session, signOut } = useAuthContext();
   const token = session?.getIdToken().getJwtToken() ?? null;
-  const { connected, messages, agentStatus, sendMessage } = useWebSocket(WS_URL, token);
+  const { connected, messages, agentStatus, sendMessage } = useWebSocket(config.webSocketUrl, token);
   const [showSettings, setShowSettings] = useState(false);
 
   const inputDisabled = connected === "disconnected";

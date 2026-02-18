@@ -118,3 +118,123 @@ ls -la packages/shared/dist/
 2025-02-17
 
 ---
+## Web UI 에러: "UserPoolId and ClientId are required"
+
+### 증상
+
+브라우저에서 Web UI 접속 시 빈 화면만 표시되고 콘솔에 다음 에러 발생:
+
+```
+Uncaught Error: Both UserPoolId and ClientId are required.
+    at new s (CognitoUserPool.js:35:13)
+    at auth.ts:9:18
+```
+
+### 원인
+
+Web 빌드 시 Cognito 설정이 환경변수로 주입되지 않음:
+- `VITE_COGNITO_USER_POOL_ID`
+- `VITE_COGNITO_CLIENT_ID`
+
+Vite는 빌드 시점에 `import.meta.env.VITE_*` 값을 번들에 포함시키는데, 환경변수가 설정되지 않으면 `undefined`가 됨.
+
+### 해결 방법
+
+**Runtime Config 방식 사용** (이미 구현됨)
+
+Web 빌드 시 환경변수 대신 런타임에 `/config.json`을 로드:
+
+1. **WebStack이 자동으로 config.json 생성**
+   - CloudFormation Output에서 값 가져옴
+   - S3에 자동 배포
+
+2. **Web App이 시작 시 config 로드**
+   - `packages/web/src/main.tsx`에서 `loadConfig()` 호출
+   - `packages/web/src/config.ts`에서 `/config.json` fetch
+
+3. **재배포**
+   ```bash
+   cd packages/web
+   npx vite build
+   cd ../cdk
+   npx aws-cdk@latest deploy WebStack --region ap-northeast-2
+   ```
+
+### 확인 방법
+
+```bash
+# config.json이 제대로 배포됐는지 확인
+curl https://<cloudfront-domain>/config.json
+
+# 출력 예시:
+# {
+#   "cognitoUserPoolId": "ap-northeast-2_xxx",
+#   "cognitoClientId": "xxx",
+#   "webSocketUrl": "wss://xxx.execute-api.amazonaws.com/prod",
+#   "apiUrl": "https://xxx.execute-api.amazonaws.com"
+# }
+```
+
+### 날짜
+
+2025-02-18
+
+---
+
+## Web UI 에러: "Cannot read properties of undefined (reading 'includes')"
+
+### 증상
+
+로그인 후 WebSocket 연결 시도 시 콘솔에 다음 에러 발생:
+
+```
+Uncaught TypeError: Cannot read properties of undefined (reading 'includes')
+    at MS.doConnect (websocket.ts:66:32)
+    at MS.connect (websocket.ts:26:10)
+    at useWebSocket.ts:93:12
+```
+
+### 원인
+
+`ChatContainer.tsx`에서 WebSocket URL을 `import.meta.env.VITE_WS_URL`로 가져오는데, 빌드 시 환경변수가 없어서 `undefined`가 됨.
+
+```typescript
+// 문제 코드
+const WS_URL = import.meta.env.VITE_WS_URL;  // undefined
+const { connected, messages, agentStatus, sendMessage } = useWebSocket(WS_URL, token);
+```
+
+### 해결 방법
+
+Runtime Config에서 WebSocket URL 가져오도록 수정 (이미 구현됨):
+
+```typescript
+// 수정된 코드
+import { getConfig } from "../../config";
+
+export function ChatContainer() {
+  const config = getConfig();
+  const { connected, messages, agentStatus, sendMessage } = useWebSocket(config.webSocketUrl, token);
+  // ...
+}
+```
+
+재배포:
+```bash
+cd packages/web
+npx vite build
+cd ../cdk
+npx aws-cdk@latest deploy WebStack --region ap-northeast-2
+```
+
+### 관련 파일
+
+- `packages/web/src/components/Chat/ChatContainer.tsx`
+- `packages/web/src/config.ts`
+- `packages/cdk/lib/stacks/web-stack.ts`
+
+### 날짜
+
+2025-02-18
+
+---
