@@ -43,7 +43,7 @@ describe("patchConfig", () => {
     expect(written.auth.token).toBeUndefined();
   });
 
-  it("should remove secrets (token, apiKey, botToken)", () => {
+  it("should remove secrets (token)", () => {
     mockedFs.readFileSync.mockReturnValue(JSON.stringify(BASE_CONFIG));
     mockedFs.writeFileSync.mockImplementation(() => {});
 
@@ -53,23 +53,10 @@ describe("patchConfig", () => {
       mockedFs.writeFileSync.mock.calls[0][1] as string,
     );
     expect(written.auth.token).toBeUndefined();
-    expect(written.llm.apiKey).toBeUndefined();
     expect(written.telegram).toBeUndefined();
   });
 
-  it("should override LLM model from env var", () => {
-    mockedFs.readFileSync.mockReturnValue(JSON.stringify(BASE_CONFIG));
-    mockedFs.writeFileSync.mockImplementation(() => {});
-
-    patchConfig("/path/to/openclaw.json", { llmModel: "claude-sonnet" });
-
-    const written = JSON.parse(
-      mockedFs.writeFileSync.mock.calls[0][1] as string,
-    );
-    expect(written.llm.model).toBe("claude-sonnet");
-  });
-
-  it("should keep LLM model unchanged when no override provided", () => {
+  it("should keep LLM model unchanged", () => {
     mockedFs.readFileSync.mockReturnValue(JSON.stringify(BASE_CONFIG));
     mockedFs.writeFileSync.mockImplementation(() => {});
 

@@ -11,6 +11,7 @@ export const SSM_SECRETS = {
   ANTHROPIC_API_KEY: "/serverless-openclaw/secrets/anthropic-api-key",
   OPENAI_API_KEY: "/serverless-openclaw/secrets/openai-api-key",
   OPENROUTER_API_KEY: "/serverless-openclaw/secrets/openrouter-api-key",
+  GEMINI_API_KEY: "/serverless-openclaw/secrets/gemini-api-key",
   OLLAMA_API_KEY: "/serverless-openclaw/secrets/ollama-api-key",
   TELEGRAM_BOT_TOKEN: "/serverless-openclaw/secrets/telegram-bot-token",
   TELEGRAM_WEBHOOK_SECRET: "/serverless-openclaw/secrets/telegram-webhook-secret",

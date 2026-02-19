@@ -248,6 +248,79 @@ docker push $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/serverless-openclaw:la
 ./scripts/deploy-image.sh
 ```
 
+### 5-3. TaskState 리셋 (중요!)
+
+**Docker 이미지를 재배포할 때마다 반드시 실행해야 함!**
+
+**이유**: 
+- 컨테이너가 실패하면 DynamoDB TaskState가 "Starting" 상태로 남음
+- 새 컨테이너 시작 시 기존 TaskState가 있으면 "이미 실행 중"으로 판단하여 시작 안 됨
+- 결과: 메시지 보내도 응답 없음
+
+**해결 방법**:
+```bash
+# 1. 현재 TaskState 확인
+aws dynamodb scan \
+  --table-name serverless-openclaw-TaskState \
+  --region $AWS_REGION \
+  --profile $AWS_PROFILE \
+  --query "Items[*].PK.S"
+
+# 2. 사용자별 TaskState 삭제
+aws dynamodb delete-item \
+  --table-name serverless-openclaw-TaskState \
+  --key '{"PK":{"S":"USER#<user-id>"}}' \
+  --region $AWS_REGION \
+  --profile $AWS_PROFILE
+```
+
+**예시**:
+```bash
+# 출력 예시:
+# [
+#     "USER#24a8ad7c-7021-70f6-7a7c-3e52faa2c335",
+#     "USER#telegram:337607235"
+# ]
+
+# Web UI 사용자 삭제
+aws dynamodb delete-item \
+  --table-name serverless-openclaw-TaskState \
+  --key '{"PK":{"S":"USER#24a8ad7c-7021-70f6-7a7c-3e52faa2c335"}}' \
+  --region ap-northeast-2
+
+# Telegram 사용자 삭제 (사용 시)
+aws dynamodb delete-item \
+  --table-name serverless-openclaw-TaskState \
+  --key '{"PK":{"S":"USER#telegram:337607235"}}' \
+  --region ap-northeast-2
+```
+
+**자동화 스크립트** (선택사항):
+```bash
+# 모든 TaskState 삭제 (Web UI + Telegram 모두)
+aws dynamodb scan \
+  --table-name serverless-openclaw-TaskState \
+  --region $AWS_REGION \
+  --profile $AWS_PROFILE \
+  --query "Items[*].PK.S" \
+  --output text | \
+  xargs -I {} aws dynamodb delete-item \
+    --table-name serverless-openclaw-TaskState \
+    --key '{"PK":{"S":"{}"}}' \
+    --region $AWS_REGION \
+    --profile $AWS_PROFILE
+```
+
+**Telegram 사용 시 주의**:
+- Telegram 사용자 ID는 `USER#telegram:<user-id>` 형식
+- Web UI 사용자와 별도로 관리됨
+- Telegram 메시지 전송 시에도 TaskState 확인 및 삭제 필요
+
+**주의**: 
+- TaskState 삭제는 실행 중인 컨테이너에 영향 없음
+- 다음 메시지 전송 시 새 컨테이너가 시작됨
+- 프로덕션 환경에서는 자동 정리 로직 추가 권장
+
 ---
 
 ## 6단계: 배포 확인
@@ -403,9 +476,40 @@ aws ecr get-login-password --region $AWS_REGION --profile $AWS_PROFILE \
 - [ ] SecretsStack 배포 완료
 - [ ] 모든 CDK 스택 배포 완료 (6개)
 - [ ] Docker 이미지 ECR에 푸시 완료
+- [ ] **TaskState 리셋 완료 (Docker 재배포 시 필수!)**
 - [ ] Cognito 테스트 사용자 생성 완료
 - [ ] Web UI 접속 및 로그인 성공
 - [ ] 채팅 메시지 전송 테스트 성공
+
+---
+
+## 재배포 시 주의사항
+
+### Docker 이미지 재배포 시
+
+**반드시 TaskState 리셋!**
+```bash
+# 1. TaskState 확인
+aws dynamodb scan --table-name serverless-openclaw-TaskState --region $AWS_REGION --query "Items[*].PK.S"
+
+# 2. 각 사용자별 삭제
+aws dynamodb delete-item \
+  --table-name serverless-openclaw-TaskState \
+  --key '{"PK":{"S":"USER#<user-id>"}}' \
+  --region $AWS_REGION
+```
+
+### ComputeStack 재배포 시
+
+**DEPLOYMENT_VERSION 증가 필수!**
+- `packages/cdk/lib/stacks/compute-stack.ts`에서 `DEPLOYMENT_VERSION` 값 증가
+- Lambda가 새 TaskDefinition을 인식하도록 함
+- ApiStack도 함께 재배포
+
+```bash
+# ComputeStack과 ApiStack 함께 배포
+npx cdk deploy ComputeStack ApiStack --profile $AWS_PROFILE
+```
 
 ---
 

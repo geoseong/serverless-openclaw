@@ -1,0 +1,21 @@
+{
+  "gateway": {
+    "port": 18789,
+    "mode": "local"
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "google/gemini-3-flash-preview"
+      },
+      "models": {
+        "google/gemini-3-flash-preview": {
+          "alias": "Gemini 3 Flash Preview"
+        },
+        "openrouter/arcee-ai/trinity-large-preview:free": {
+          "alias": "Trinity Large Preview Free"
+        }
+      }
+    }
+  }
+}

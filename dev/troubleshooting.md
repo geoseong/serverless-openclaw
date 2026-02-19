@@ -238,3 +238,111 @@ npx aws-cdk@latest deploy WebStack --region ap-northeast-2
 2025-02-18
 
 ---
+## Anthropic API 크레딧 부족 및 OpenRouter 대체
+
+### 증상
+
+메시지 전송 후 응답이 없음. CloudWatch 로그에서:
+
+```
+[bridge] Stream complete, total length: 0
+[gateway] agent model: anthropic/claude-opus-4-6
+```
+
+OpenClaw Gateway가 빈 응답을 반환.
+
+### 원인
+
+1. **Anthropic API 크레딧 부족**
+   ```
+   Your credit balance is too low to access the Anthropic API
+   ```
+
+2. **OpenAI API quota 초과**
+   ```
+   insufficient_quota
+   ```
+
+3. **OpenClaw Gateway 기본 모델 문제**
+   - 기본 모델: `anthropic/claude-opus-4-6` (존재하지 않는 모델명)
+   - Config 파일을 자동으로 덮어씀
+   - 환경변수로 모델 오버라이드 불가
+
+### 해결 방법
+
+**OpenRouter 무료 모델 사용** (이미 구현됨)
+
+1. **Dockerfile에 OpenRouter 설정 추가**
+   ```dockerfile
+   # Pre-generate openclaw config with OpenRouter
+   RUN mkdir -p /home/openclaw/.openclaw && \
+       echo '{"gateway":{"port":18789,"mode":"local"},"llm":{"provider":"openrouter","model":"arcee-ai/trinity-large-preview:free","baseURL":"https://openrouter.ai/api/v1"}}' > /home/openclaw/.openclaw/openclaw.json && \
+       chown -R openclaw:openclaw /home/openclaw/.openclaw
+   ```
+
+2. **Docker 이미지 빌드 및 ECR 푸시**
+   ```bash
+   docker build --platform linux/arm64 -t openclaw-container:latest -f packages/container/Dockerfile .
+   docker tag openclaw-container:latest 623542739657.dkr.ecr.ap-northeast-2.amazonaws.com/serverless-openclaw:latest
+   docker push 623542739657.dkr.ecr.ap-northeast-2.amazonaws.com/serverless-openclaw:latest
+   ```
+
+3. **Lambda 강제 업데이트**
+   - `packages/cdk/lib/stacks/api-stack.ts`에서 `DEPLOYMENT_VERSION` 증가
+   - ApiStack 재배포로 Lambda가 새 컨테이너 시작
+
+4. **OpenRouter API Key 설정**
+   - SSM Parameter Store에 `OPENROUTER_API_KEY` 저장
+   - Fargate 컨테이너에 환경변수로 주입
+
+### OpenRouter 무료 모델 테스트
+
+```bash
+curl -s https://openrouter.ai/api/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-or-v1-xxx" \
+  -d '{"model": "arcee-ai/trinity-large-preview:free","messages": [{"role": "user", "content": "Hi"}]}'
+```
+
+응답:
+```json
+{
+  "id": "gen-xxx",
+  "model": "arcee-ai/trinity-large-preview:free",
+  "choices": [{
+    "message": {
+      "role": "assistant",
+      "content": "Hello! How can I assist you today?"
+    }
+  }],
+  "usage": {
+    "cost": 0
+  }
+}
+```
+
+### 확인 방법
+
+1. **Web UI에서 메시지 전송**
+2. **CloudWatch 로그 확인**
+   ```bash
+   aws logs tail /ecs/serverless-openclaw --follow --since 5m
+   ```
+3. **예상 로그**:
+   ```
+   [gateway] Using OpenRouter provider
+   [gateway] agent model: arcee-ai/trinity-large-preview:free
+   [bridge] Stream complete, total length: > 0
+   ```
+
+### 관련 파일
+
+- `packages/container/Dockerfile`
+- `packages/cdk/lib/stacks/compute-stack.ts` (OPENROUTER_API_KEY 환경변수)
+- `packages/cdk/lib/stacks/api-stack.ts` (DEPLOYMENT_VERSION)
+
+### 날짜
+
+2025-02-18
+
+---

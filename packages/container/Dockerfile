@@ -29,9 +29,11 @@ RUN npm install -g openclaw@${OPENCLAW_VERSION} && \
 # Create non-root user
 RUN groupadd -r openclaw && useradd -r -g openclaw -m openclaw
 
-# Pre-generate openclaw config (skip onboard at runtime)
+# Pre-generate openclaw config with Gemini and OpenRouter fallback
+COPY --chown=openclaw:openclaw packages/container/openclaw.json /tmp/openclaw.json
 RUN mkdir -p /home/openclaw/.openclaw && \
-    echo '{"gateway":{"port":18789,"mode":"local"}}' > /home/openclaw/.openclaw/openclaw.json && \
+    cp /tmp/openclaw.json /home/openclaw/.openclaw/openclaw.json && \
+    rm /tmp/openclaw.json && \
     chown -R openclaw:openclaw /home/openclaw/.openclaw
 
 WORKDIR /app
@@ -47,8 +49,9 @@ COPY --chown=openclaw:openclaw packages/container/package.json /app/
 COPY --chown=openclaw:openclaw packages/container/start-openclaw.sh /app/
 
 RUN chmod +x /app/start-openclaw.sh && \
-    mkdir -p /data/workspace && \
-    chown openclaw:openclaw /data/workspace
+    mkdir -p /data && \
+    ln -s /home/openclaw/.openclaw/workspace /data/workspace && \
+    chown -h openclaw:openclaw /data/workspace
 
 USER openclaw
 

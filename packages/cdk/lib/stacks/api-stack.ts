@@ -68,6 +68,7 @@ export class ApiStack extends cdk.Stack {
       TASK_DEFINITION_ARN: taskDefArn,
       SUBNET_IDS: subnetIds,
       SECURITY_GROUP_IDS: securityGroupIds,
+      DEPLOYMENT_VERSION: "5", // Force Lambda update - Gemini added
     };
 
     // Common bundling options for NodejsFunction

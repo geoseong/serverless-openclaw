@@ -54,17 +54,21 @@ export function createApp(deps: BridgeDeps): express.Express {
     void (async () => {
       const msgStart = Date.now();
       try {
+        console.log(`[bridge] Processing message for user ${body.userId}: ${body.message?.substring(0, 50)}`);
         let prefix = deps.getAndClearHistoryPrefix?.() ?? "";
         if (body.channel === "telegram") {
           prefix += "[System: 마크다운 서식(**bold**, *italic*, ```code``` 등)을 사용하지 말고 순수 텍스트로 응답하세요.]\n";
         }
         const messageToSend = prefix ? prefix + body.message! : body.message!;
+        console.log(`[bridge] Sending to OpenClaw...`);
         const generator = deps.openclawClient.sendMessage(
           body.userId!,
           messageToSend,
         );
+        console.log(`[bridge] Generator created, starting iteration...`);
         let fullResponse = "";
         for await (const chunk of generator) {
+          console.log(`[bridge] Received chunk: ${chunk.substring(0, 30)}...`);
           fullResponse += chunk;
           await deps.callbackSender.send(body.connectionId!, {
             type: "stream_chunk",
@@ -72,6 +76,7 @@ export function createApp(deps: BridgeDeps): express.Express {
             conversationId: undefined,
           });
         }
+        console.log(`[bridge] Stream complete, total length: ${fullResponse.length}`);
         await deps.callbackSender.send(body.connectionId!, {
           type: "stream_end",
         });
@@ -99,10 +104,13 @@ export function createApp(deps: BridgeDeps): express.Express {
           ).catch(() => {});
         }
       } catch (err) {
+        console.error(`[bridge] Error processing message:`, err);
         await deps.callbackSender.send(body.connectionId!, {
           type: "error",
           error: err instanceof Error ? err.message : "Unknown error",
-        }).catch(() => {});
+        }).catch((callbackErr) => {
+          console.error(`[bridge] Failed to send error callback:`, callbackErr);
+        });
       }
     })();
   });

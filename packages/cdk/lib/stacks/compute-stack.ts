@@ -60,6 +60,10 @@ export class ComputeStack extends cdk.Stack {
       this, "OpenRouterApiKey",
       { parameterName: SSM_SECRETS.OPENROUTER_API_KEY },
     );
+    const geminiApiKey = ssm.StringParameter.fromSecureStringParameterAttributes(
+      this, "GeminiApiKey",
+      { parameterName: SSM_SECRETS.GEMINI_API_KEY },
+    );
     const ollamaApiKey = ssm.StringParameter.fromSecureStringParameterAttributes(
       this, "OllamaApiKey",
       { parameterName: SSM_SECRETS.OLLAMA_API_KEY },
@@ -103,6 +107,10 @@ export class ComputeStack extends cdk.Stack {
         DATA_BUCKET: props.dataBucket.bucketName,
         BRIDGE_PORT: String(BRIDGE_PORT),
         METRICS_ENABLED: "true",
+        // OpenClaw Gateway model configuration
+        OPENCLAW_MODEL: "claude-3-5-sonnet-20241022",
+        // Force task definition update
+        DEPLOYMENT_VERSION: "2026.02.09.10",
       },
       secrets: {
         BRIDGE_AUTH_TOKEN: ecs.Secret.fromSsmParameter(bridgeAuthToken),
@@ -110,6 +118,7 @@ export class ComputeStack extends cdk.Stack {
         ANTHROPIC_API_KEY: ecs.Secret.fromSsmParameter(anthropicApiKey),
         OPENAI_API_KEY: ecs.Secret.fromSsmParameter(openaiApiKey),
         OPENROUTER_API_KEY: ecs.Secret.fromSsmParameter(openrouterApiKey),
+        GEMINI_API_KEY: ecs.Secret.fromSsmParameter(geminiApiKey),
         OLLAMA_API_KEY: ecs.Secret.fromSsmParameter(ollamaApiKey),
         TELEGRAM_BOT_TOKEN: ecs.Secret.fromSsmParameter(telegramBotToken),
       },
